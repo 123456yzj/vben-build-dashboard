@@ -1,0 +1,21 @@
+{
+  "name": "vben-build-dashboard",
+  "version": "1.0.0",
+  "description": "A lightweight web dashboard for managing branches and building monorepo projects on Ubuntu server",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs"
+  },
+  "keywords": [
+    "monorepo",
+    "devops",
+    "dashboard",
+    "git",
+    "pnpm",
+    "turbo"
+  ],
+  "author": "",
+  "license": "MIT"
+}

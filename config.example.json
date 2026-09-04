@@ -1,0 +1,20 @@
+{
+  "port": 9527,
+  "host": "0.0.0.0",
+  "targetRepoPath": "D:/project/impact/app-v1/web-framework",
+  "maxMemoryMb": 8192,
+  "allowParallel": true,
+  "protectedBranches": [
+    "master",
+    "main",
+    "develop",
+    "test"
+  ],
+  "deployTargets": {
+    "@repo/admin": "/var/www/web-admin",
+    "@repo/bms": "/var/www/web-bms",
+    "@repo/tms": "/var/www/web-tms",
+    "@repo/multichannel": "/var/www/web-multichannel"
+  },
+  "autoDeployAfterBuild": false
+}
