@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  vben-build-dashboard:
+    build: .
+    container_name: vben-build-dashboard
+    restart: unless-stopped
+    ports:
+      - "9527:9527"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=9527
+      - TARGET_REPO_PATH=/workspace/repo
+    volumes:
+      # 1. 挂载宿主机目标 Monorepo 项目源码目录
+      - ${HOST_REPO_PATH:-/home/ubuntu/web-framework}:/workspace/repo
+      # 2. 挂载宿主机各业务包部署的目标根目录（如 /var/www）
+      - ${HOST_DEPLOY_PATH:-/var/www}:/var/www
+      # 3. 持久化工具配置
+      - ./config.json:/app/config.json

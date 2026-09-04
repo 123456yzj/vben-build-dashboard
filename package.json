@@ -8,6 +8,14 @@
     "start": "node server.mjs",
     "dev": "node --watch server.mjs"
   },
+  "dependencies": {
+    "@koa/router": "^13.1.0",
+    "archiver": "^7.0.1",
+    "koa": "^2.15.3",
+    "koa-bodyparser": "^4.4.1",
+    "koa-static": "^5.0.0",
+    "ws": "^8.18.0"
+  },
   "keywords": [
     "monorepo",
     "devops",
