@@ -99,13 +99,18 @@ router.post('/git/fetch', async (ctx) => {
     triggerBackgroundScan(config.targetRepoPath);
     ctx.body = res;
   } else {
-    // 全局 fetch
-    const repos = await git.scanAllRepos(config.targetRepoPath);
-    for (const r of repos) {
-      if (r.isGit) await git.fetchRepo(r.path);
-    }
-    const freshRepos = await git.scanAllRepos(config.targetRepoPath);
-    db.saveCachedRepos(freshRepos);
+    // 全局 fetch：从 SQLite 获取仓库列表并并发执行 git fetch -p
+    const cached = db.getCachedRepos();
+    const reposToFetch = (cached && cached.length > 0)
+      ? cached
+      : await git.scanAllRepos(config.targetRepoPath);
+
+    await Promise.all(
+      reposToFetch.filter(r => r.isGit).map(r => git.fetchRepo(r.path))
+    );
+
+    // 异步触发后台重扫写入 SQLite 并推送 WebSocket 最新数据
+    triggerBackgroundScan(config.targetRepoPath);
     ctx.body = { success: true, message: '已完成全部子仓库远程分支刷新 (git fetch -p)' };
   }
 });
