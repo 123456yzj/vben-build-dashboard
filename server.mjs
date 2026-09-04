@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 
-import { getConfig, saveConfig } from './lib/config.mjs';
+import { getConfig, saveConfig, validateConfig } from './lib/config.mjs';
 import * as git from './lib/git.mjs';
 import { buildManager } from './lib/build.mjs';
 import * as monitor from './lib/monitor.mjs';
@@ -63,8 +63,20 @@ router.get('/config', async (ctx) => {
 });
 
 router.post('/config', async (ctx) => {
-  const prevConfig = getConfig();
   const body = ctx.request.body || {};
+
+  // 1. 保存前数据合理性校验（目录是否存在、格式、权限等）
+  const check = validateConfig(body);
+  if (!check.valid) {
+    ctx.status = 400;
+    ctx.body = {
+      success: false,
+      message: check.message || '配置数据校验未通过，请检查输入！',
+    };
+    return;
+  }
+
+  const prevConfig = getConfig();
   const updated = saveConfig(body);
   const pathChanged = prevConfig.targetRepoPath !== updated.targetRepoPath;
   const forceRefresh = Boolean(body.forceRefresh);

@@ -704,8 +704,19 @@ createApp({
     };
 
     const saveSystemSettings = async () => {
+      const targetPath = (config.targetRepoPath || '').trim();
+      if (!targetPath) {
+        showToast('目标 Monorepo 根路径不能为空！', 'error');
+        return;
+      }
+      if (config.maxMemoryMb && Number(config.maxMemoryMb) < 512) {
+        showToast('构建最大内存上限不能低于 512 MB！', 'error');
+        return;
+      }
+
       try {
         loading.refresh = true;
+        showToast('正在校验并保存配置...');
         const res = await fetch('/api/config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -726,7 +737,7 @@ createApp({
             await loadRepos(true);
           }
         } else {
-          showToast('保存失败: ' + json.message, 'error');
+          showToast('保存被拦截: ' + (json.message || '配置校验失败'), 'error');
         }
       } catch (err) {
         showToast('保存失败: ' + err.message, 'error');
