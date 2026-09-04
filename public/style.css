@@ -403,6 +403,63 @@ select:focus, input:focus {
   border-color: var(--border-active);
 }
 
+/* 表单输入框校验状态与就地提示 */
+.input-error, input.input-error {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.35) !important;
+}
+.input-success, input.input-success {
+  border-color: #10b981 !important;
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.35) !important;
+}
+.input-loading, input.input-loading {
+  border-color: #38bdf8 !important;
+}
+
+.field-feedback {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.field-feedback.error {
+  color: #f87171;
+}
+.field-feedback.success {
+  color: #34d399;
+}
+.field-feedback.loading {
+  color: #38bdf8;
+}
+.field-feedback.warning {
+  color: #fbbf24;
+}
+
+.field-help {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.spinner-sm {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(56, 189, 248, 0.3);
+  border-top-color: #38bdf8;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 4px;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* Terminal Console Viewport */
 .console-card {
   background: #090d16;

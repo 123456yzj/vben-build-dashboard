@@ -62,6 +62,17 @@ router.get('/config', async (ctx) => {
   ctx.body = { success: true, data: getConfig() };
 });
 
+router.post('/config/validate', async (ctx) => {
+  const body = ctx.request.body || {};
+  const check = validateConfig(body);
+  ctx.body = {
+    success: true,
+    valid: check.valid,
+    field: check.field || null,
+    message: check.message || (check.valid ? '校验通过' : '校验未通过'),
+  };
+});
+
 router.post('/config', async (ctx) => {
   const body = ctx.request.body || {};
 
