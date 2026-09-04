@@ -6,7 +6,8 @@
   "main": "server.mjs",
   "scripts": {
     "start": "node server.mjs",
-    "dev": "node --watch server.mjs"
+    "dev": "node --watch server.mjs",
+    "bridge": "node bridge.cjs"
   },
   "dependencies": {
     "@koa/router": "^13.1.0",
