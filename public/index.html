@@ -179,20 +179,15 @@
 
             <!-- 操作与分支切换栏 -->
             <div class="repo-actions-bar">
-              <div class="repo-branch-select">
-                <select v-model="targetBranches[repo.name]" style="flex: 1;">
-                  <option disabled value="">选择目标分支...</option>
-                  <optgroup label="本地分支">
-                    <option v-for="b in repo.localBranches" :key="'loc-' + b" :value="b">{{ b }}</option>
-                  </optgroup>
-                  <optgroup label="远程分支">
-                    <option v-for="b in repo.remoteBranches" :key="'rem-' + b" :value="b">origin/{{ b }}</option>
-                  </optgroup>
-                </select>
-                <button class="btn btn-default btn-sm" @click="checkoutSingle(repo)" :disabled="!targetBranches[repo.name]">
+              <div class="repo-branch-control">
+                <div class="branch-pill" @click="openBranchPicker(repo)" title="点击切换分支 (VS Code 风格选择器)">
+                  <span class="branch-pill-icon">🌿</span>
+                  <span class="branch-pill-name">{{ repo.currentBranch }}</span>
+                </div>
+                <button class="btn btn-primary btn-sm" @click="openBranchPicker(repo)" title="弹出分支选择面板">
                   切换
                 </button>
-                <button class="btn btn-default btn-sm" @click="fetchSingle(repo)">
+                <button class="btn btn-default btn-sm" @click="fetchSingle(repo)" title="从远程拉取最新分支信息">
                   Fetch
                 </button>
               </div>
@@ -245,7 +240,111 @@
           </div>
         </div>
       </section>
-    </main>
+    <!-- 弹窗 0：VS Code 风格分支检出选择器 (QuickPick Branch Picker) -->
+    <div class="modal-overlay" v-if="branchPicker.show" @click.self="branchPicker.show = false">
+      <div class="modal-content branch-picker-modal">
+        <div class="modal-header" style="border-bottom: none; padding-bottom: 6px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 20px;">🌿</span>
+            <div>
+              <h3 class="modal-title" style="font-size: 16px;">选择分支以检出 (Checkout)</h3>
+              <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+                仓库: <strong style="color: #38bdf8;">{{ branchPicker.repo?.name }}</strong>
+                <span style="margin: 0 6px;">·</span>
+                当前检出: <span style="color: #34d399; font-weight: 600;">{{ branchPicker.repo?.currentBranch }}</span>
+              </div>
+            </div>
+          </div>
+          <button class="btn btn-default btn-sm" @click="branchPicker.show = false">✕</button>
+        </div>
+
+        <div class="branch-picker-body">
+          <!-- 搜索输入框 (VS Code QuickPick 风格) -->
+          <div class="branch-search-box">
+            <span class="search-icon">🔍</span>
+            <input
+              type="text"
+              ref="branchSearchInput"
+              v-model="branchPicker.search"
+              placeholder="输入分支名称快速过滤..."
+              class="branch-quick-input"
+              @keydown.esc="branchPicker.show = false"
+            >
+            <button
+              v-if="branchPicker.search"
+              class="clear-search-btn"
+              @click="branchPicker.search = ''"
+            >✕</button>
+          </div>
+
+          <!-- 分类筛选 Tab -->
+          <div class="branch-type-tabs">
+            <button
+              class="branch-tab"
+              :class="{ active: branchPicker.tab === 'all' }"
+              @click="branchPicker.tab = 'all'"
+            >
+              全部 ({{ pickerFilteredBranches.length }})
+            </button>
+            <button
+              class="branch-tab"
+              :class="{ active: branchPicker.tab === 'local' }"
+              @click="branchPicker.tab = 'local'"
+            >
+              🌿 本地分支 ({{ pickerLocalCount }})
+            </button>
+            <button
+              class="branch-tab"
+              :class="{ active: branchPicker.tab === 'remote' }"
+              @click="branchPicker.tab = 'remote'"
+            >
+              🌐 远程分支 ({{ pickerRemoteCount }})
+            </button>
+          </div>
+
+          <!-- 分支列表 (VS Code 风格列表) -->
+          <div class="branch-picker-list">
+            <div
+              v-if="pickerFilteredBranches.length === 0"
+              class="branch-picker-empty"
+            >
+              没有匹配的分支
+            </div>
+
+            <div
+              v-else
+              v-for="item in pickerFilteredBranches"
+              :key="item.key"
+              class="branch-picker-item"
+              :class="{ 'is-current': item.isCurrent }"
+              @click="selectBranchAndCheckout(item)"
+            >
+              <div class="branch-item-left">
+                <span class="branch-kind-icon">{{ item.isRemote ? '🌐' : '🌿' }}</span>
+                <div class="branch-name-wrap">
+                  <span class="branch-item-name">{{ item.name }}</span>
+                  <span class="branch-remote-tag" v-if="item.isRemote">origin</span>
+                </div>
+              </div>
+
+              <div class="branch-item-right">
+                <span class="badge badge-branch" v-if="item.isCurrent" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border-color: rgba(16, 185, 129, 0.4);">
+                  ✔ 当前检出
+                </span>
+                <span class="switch-hint" v-else>
+                  点击切换 ↵
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer" style="padding-top: 10px; margin-bottom: 0; font-size: 11.5px; color: var(--text-muted); justify-content: space-between; align-items: center;">
+          <span>提示：支持输入关键字搜索；点击远程分支将自动创建并跟踪同名本地分支</span>
+          <button class="btn btn-default btn-sm" @click="branchPicker.show = false">关闭 (Esc)</button>
+        </div>
+      </div>
+    </div>
 
     <!-- 弹窗 1：脏工作区（未提交改动）拦截与暂存处理 -->
     <div class="modal-overlay" v-if="dirtyModal.show">

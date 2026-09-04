@@ -85,6 +85,15 @@ createApp({
       selected: [],
     });
 
+    // VS Code 风格分支选择弹窗状态
+    const branchPicker = reactive({
+      show: false,
+      repo: null,
+      search: '',
+      tab: 'all', // 'all' | 'local' | 'remote'
+    });
+    const branchSearchInput = ref(null);
+
     const showEnvModal = ref(false);
     const showSettingsModal = ref(false);
     const repoSource = ref('');
@@ -109,6 +118,79 @@ createApp({
 
     const deletableFilteredCount = computed(() => {
       return filteredLocalBranches.value.filter(b => b.canDelete).length;
+    });
+
+    // 分支选择弹窗：本地分支列表（根据搜索词过滤，当前分支置顶）
+    const pickerLocalBranches = computed(() => {
+      if (!branchPicker.repo) return [];
+      const current = branchPicker.repo.currentBranch;
+      const raw = branchPicker.repo.localBranches || (branchPicker.repo.allBranches || []);
+      const set = new Set();
+      const list = [];
+
+      for (const b of raw) {
+        if (!b || b === 'HEAD' || b.includes('->')) continue;
+        const clean = b.replace(/^origin\//, '').trim();
+        if (clean && !set.has(clean)) {
+          set.add(clean);
+          list.push(clean);
+        }
+      }
+
+      const kw = (branchPicker.search || '').trim().toLowerCase();
+      const filtered = kw ? list.filter(b => b.toLowerCase().includes(kw)) : list;
+
+      return filtered.sort((a, b) => {
+        if (a === current) return -1;
+        if (b === current) return 1;
+        return a.localeCompare(b);
+      }).map(name => ({
+        key: `local:${name}`,
+        name,
+        isRemote: false,
+        isCurrent: name === current,
+      }));
+    });
+
+    // 分支选择弹窗：远程分支列表（根据搜索词过滤）
+    const pickerRemoteBranches = computed(() => {
+      if (!branchPicker.repo) return [];
+      const raw = branchPicker.repo.remoteBranches || [];
+      const set = new Set();
+      const list = [];
+
+      for (const b of raw) {
+        if (!b || b === 'HEAD' || b.includes('->')) continue;
+        const clean = b.replace(/^origin\//, '').trim();
+        if (clean && !set.has(clean)) {
+          set.add(clean);
+          list.push(clean);
+        }
+      }
+
+      const kw = (branchPicker.search || '').trim().toLowerCase();
+      const filtered = kw ? list.filter(b => b.toLowerCase().includes(kw)) : list;
+
+      return filtered.sort((a, b) => a.localeCompare(b)).map(name => ({
+        key: `remote:${name}`,
+        name,
+        isRemote: true,
+        isCurrent: false,
+      }));
+    });
+
+    const pickerLocalCount = computed(() => pickerLocalBranches.value.length);
+    const pickerRemoteCount = computed(() => pickerRemoteBranches.value.length);
+
+    // 分支选择弹窗：根据 Tab 聚合的分支列表
+    const pickerFilteredBranches = computed(() => {
+      if (branchPicker.tab === 'local') {
+        return pickerLocalBranches.value;
+      }
+      if (branchPicker.tab === 'remote') {
+        return pickerRemoteBranches.value;
+      }
+      return [...pickerLocalBranches.value, ...pickerRemoteBranches.value];
     });
 
     const buildStatusText = computed(() => {
@@ -274,9 +356,54 @@ createApp({
 
     // ==================== Git 分支操作 ====================
 
-    const checkoutSingle = async (repo, force = false) => {
-      const targetBranch = (targetBranches[repo.name] || '').replace(/^origin\//, '');
-      if (!targetBranch) return;
+    // 打开 VS Code 风格分支选择弹窗
+    const openBranchPicker = (repo) => {
+      branchPicker.repo = repo;
+      branchPicker.search = '';
+      branchPicker.tab = 'all';
+      branchPicker.show = true;
+      nextTick(() => {
+        if (branchSearchInput.value) {
+          branchSearchInput.value.focus();
+        }
+      });
+    };
+
+    // 分支弹窗中选中分支并执行检出
+    const selectBranchAndCheckout = async (item) => {
+      if (!item || !item.name) return;
+      if (item.isCurrent) {
+        showToast(`当前已在分支 ${item.name}`);
+        branchPicker.show = false;
+        return;
+      }
+      const repo = branchPicker.repo;
+      branchPicker.show = false;
+      await checkoutSingle(repo, item.name);
+    };
+
+    const checkoutSingle = async (repo, branchName = null, force = false) => {
+      // 兼容历史调用：若第 2 个参数为布尔值，则为 force 参数
+      if (typeof branchName === 'boolean') {
+        force = branchName;
+        branchName = null;
+      }
+      force = force === true;
+
+      const targetBranch = (
+        branchName ||
+        targetBranches[repo.name] ||
+        (dirtyModal.repo?.name === repo.name ? dirtyModal.targetBranch : '') ||
+        ''
+      ).replace(/^origin\//, '');
+
+      if (!targetBranch) {
+        showToast('请选择或指定目标分支', 'error');
+        return;
+      }
+
+      // 同步缓存当前目标分支
+      targetBranches[repo.name] = targetBranch;
 
       try {
         const res = await fetch('/api/git/checkout', {
@@ -842,6 +969,13 @@ createApp({
 
     // 初始化：并行发出请求，秒级渲染
     onMounted(async () => {
+      // 监听全局 Esc 按键关闭分支选择弹窗
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && branchPicker.show) {
+          branchPicker.show = false;
+        }
+      });
+
       await Promise.all([
         loadConfig(),
         loadRepos(false),
@@ -874,6 +1008,13 @@ createApp({
       dirtyModal,
       batchModal,
       branchDrawer,
+      branchPicker,
+      branchSearchInput,
+      openBranchPicker,
+      selectBranchAndCheckout,
+      pickerFilteredBranches,
+      pickerLocalCount,
+      pickerRemoteCount,
       showEnvModal,
       showSettingsModal,
       newNodeVersion,

@@ -381,12 +381,233 @@ body {
   flex-wrap: wrap;
 }
 
-.repo-branch-select {
+.repo-branch-control {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: 1;
-  min-width: 200px;
+  min-width: 0;
+}
+
+.branch-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid #334155;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: #38bdf8;
+  cursor: pointer;
+  max-width: 240px;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.branch-pill:hover {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  transform: translateY(-1px);
+}
+
+.branch-pill-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.branch-pill-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+/* VS Code Source Control 风格分支选择器弹窗 */
+.branch-picker-modal {
+  max-width: 640px !important;
+  width: 100%;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(56, 189, 248, 0.25) !important;
+}
+
+.branch-picker-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.branch-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.branch-search-box .search-icon {
+  position: absolute;
+  left: 14px;
+  color: var(--text-muted);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.branch-quick-input {
+  width: 100%;
+  padding: 10px 36px 10px 38px !important;
+  font-size: 14px !important;
+  background: #090d16 !important;
+  border: 1px solid #3b82f6 !important;
+  border-radius: var(--radius-sm);
+  color: #f8fafc;
+}
+
+.branch-quick-input:focus {
+  border-color: #60a5fa !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3) !important;
+}
+
+.clear-search-btn {
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px;
+}
+.clear-search-btn:hover {
+  color: #fff;
+}
+
+.branch-type-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 6px;
+}
+
+.branch-tab {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: 500;
+}
+
+.branch-tab:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.branch-tab.active {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  font-weight: 600;
+}
+
+.branch-picker-list {
+  max-height: 380px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: #0b1120;
+}
+
+.branch-picker-empty {
+  padding: 36px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.branch-picker-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.4);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.branch-picker-item:last-child {
+  border-bottom: none;
+}
+
+.branch-picker-item:hover {
+  background: #1e293b;
+}
+
+.branch-picker-item.is-current {
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.branch-item-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.branch-kind-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.branch-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.branch-item-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: #e2e8f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-picker-item.is-current .branch-item-name {
+  color: #34d399;
+  font-weight: 700;
+}
+
+.branch-remote-tag {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+}
+
+.branch-item-right {
+  display: flex;
+  align-items: center;
+  margin-left: 14px;
+  flex-shrink: 0;
+}
+
+.switch-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.branch-picker-item:hover .switch-hint {
+  opacity: 1;
+  color: #38bdf8;
 }
 
 select, input[type="text"], input[type="number"] {
