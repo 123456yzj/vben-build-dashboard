@@ -769,6 +769,7 @@ createApp({
         if (json.success) {
           showToast(json.message || '系统设置已成功保存！');
           showSettingsModal.value = false;
+          // 仅当后端因路径变更返回了全新落库的大盘数据时才刷新仓库视图
           if (json.repos && Array.isArray(json.repos)) {
             repos.value = json.repos;
             repoSource.value = 'sqlite';
@@ -776,8 +777,6 @@ createApp({
             for (const r of json.repos) {
               targetBranches[r.name] = r.currentBranch;
             }
-          } else {
-            await loadRepos(true);
           }
         } else {
           // 提交时不合法：精准在对应输入框下方提示，输入框标红

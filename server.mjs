@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 
-import { getConfig, saveConfig, validateConfig } from './lib/config.mjs';
+import { getConfig, saveConfig, validateConfig, normalizeRepoPath } from './lib/config.mjs';
 import * as git from './lib/git.mjs';
 import { buildManager } from './lib/build.mjs';
 import * as monitor from './lib/monitor.mjs';
@@ -90,7 +90,7 @@ router.post('/config', async (ctx) => {
 
   const prevConfig = getConfig();
   const updated = saveConfig(body);
-  const pathChanged = prevConfig.targetRepoPath !== updated.targetRepoPath;
+  const pathChanged = normalizeRepoPath(prevConfig.targetRepoPath) !== normalizeRepoPath(updated.targetRepoPath);
   const forceRefresh = Boolean(body.forceRefresh);
 
   let freshRepos = null;
