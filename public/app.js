@@ -216,12 +216,21 @@ createApp({
         }
 
         showToast('正在同步远程最新分支 (git fetch -p)...');
-        await fetch('/api/git/fetch', {
+        const res = await fetch('/api/git/fetch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({}),
         });
-        await loadRepos(true);
+        const json = await res.json();
+        if (json.success && json.repos) {
+          repos.value = json.repos;
+          repoSource.value = 'sqlite';
+          for (const r of json.repos) {
+            targetBranches[r.name] = r.currentBranch;
+          }
+        } else {
+          await loadRepos(true);
+        }
         showToast('已完成全局远程分支刷新与数据库同步！');
       } catch (err) {
         showToast('刷新失败: ' + err.message, 'error');
@@ -254,7 +263,12 @@ createApp({
 
         if (json.success) {
           showToast(json.message || `已切到分支 ${targetBranch}`);
-          await loadRepos();
+          if (json.repos) {
+            repos.value = json.repos;
+            repoSource.value = 'sqlite';
+          } else {
+            await loadRepos();
+          }
         } else {
           showToast(`切换分支失败: ${json.message || json.stderr}`, 'error');
         }
@@ -348,7 +362,15 @@ createApp({
         const json = await res.json();
         if (json.success) {
           showToast('批量联动切换操作已完成！');
-          await loadRepos();
+          if (json.repos) {
+            repos.value = json.repos;
+            repoSource.value = 'sqlite';
+            for (const r of json.repos) {
+              targetBranches[r.name] = r.currentBranch;
+            }
+          } else {
+            await loadRepos();
+          }
         }
       } catch (err) {
         showToast('批量切换失败: ' + err.message, 'error');
@@ -367,7 +389,15 @@ createApp({
         const json = await res.json();
         if (json.success) {
           showToast(json.message || '全局清理完成！');
-          await loadRepos();
+          if (json.repos) {
+            repos.value = json.repos;
+            repoSource.value = 'sqlite';
+            for (const r of json.repos) {
+              targetBranches[r.name] = r.currentBranch;
+            }
+          } else {
+            await loadRepos();
+          }
         }
       } catch (err) {
         showToast('清理失败: ' + err.message, 'error');
@@ -648,6 +678,7 @@ createApp({
 
     const saveSystemSettings = async () => {
       try {
+        loading.refresh = true;
         const res = await fetch('/api/config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -655,12 +686,25 @@ createApp({
         });
         const json = await res.json();
         if (json.success) {
-          showToast('系统设置已成功保存！');
+          showToast(json.message || '系统设置已成功保存！');
           showSettingsModal.value = false;
-          await loadRepos();
+          if (json.repos && Array.isArray(json.repos)) {
+            repos.value = json.repos;
+            repoSource.value = 'sqlite';
+            selectedPackages.value = [];
+            for (const r of json.repos) {
+              targetBranches[r.name] = r.currentBranch;
+            }
+          } else {
+            await loadRepos(true);
+          }
+        } else {
+          showToast('保存失败: ' + json.message, 'error');
         }
       } catch (err) {
         showToast('保存失败: ' + err.message, 'error');
+      } finally {
+        loading.refresh = false;
       }
     };
 

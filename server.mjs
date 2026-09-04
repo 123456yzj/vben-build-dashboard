@@ -45,8 +45,9 @@ async function triggerBackgroundScan(targetRepoPath) {
   isScanning = true;
   try {
     const repos = await git.scanAllRepos(targetRepoPath);
-    db.saveCachedRepos(repos);
-    broadcast({ type: 'repos_updated', data: repos });
+    db.refreshReposCache(repos);
+    const cached = db.getCachedRepos();
+    broadcast({ type: 'repos_updated', data: cached });
   } catch (err) {
     console.error('[BackgroundScan] 自动更新失败:', err.message);
   } finally {
@@ -62,8 +63,34 @@ router.get('/config', async (ctx) => {
 });
 
 router.post('/config', async (ctx) => {
-  const updated = saveConfig(ctx.request.body || {});
-  ctx.body = { success: true, data: updated, message: '配置已成功更新保存' };
+  const prevConfig = getConfig();
+  const body = ctx.request.body || {};
+  const updated = saveConfig(body);
+  const pathChanged = prevConfig.targetRepoPath !== updated.targetRepoPath;
+  const forceRefresh = Boolean(body.forceRefresh);
+
+  let freshRepos = null;
+  if (pathChanged || forceRefresh) {
+    console.log(`[Config] 目标项目路径变更或要求重扫: ${prevConfig.targetRepoPath} -> ${updated.targetRepoPath}`);
+    // 1. 数据库应该先清理
+    db.clearCachedRepos();
+    // 2. 然后刷新数据（物理扫描新路径）
+    const scanned = await git.scanAllRepos(updated.targetRepoPath);
+    // 3. 先落库
+    db.refreshReposCache(scanned);
+    // 4. 从数据库获取落库数据并返回前端
+    freshRepos = db.getCachedRepos();
+    broadcast({ type: 'repos_updated', data: freshRepos });
+  }
+
+  ctx.body = {
+    success: true,
+    data: updated,
+    repos: freshRepos,
+    message: pathChanged
+      ? '项目路径已修改，数据库已清空并完成新数据落库！'
+      : '配置已成功更新保存',
+  };
 });
 
 // --- 仓库与分支大盘 (基于 SQLite 极速秒开) ---
@@ -77,7 +104,7 @@ router.get('/repos', async (ctx) => {
     if (cached && cached.length > 0) {
       ctx.body = { success: true, data: cached, source: 'sqlite' };
       // 检查最旧记录是否超过 60 秒，若过期则后台静默校准
-      const oldestUpdate = Math.min(...cached.map(r => r.updatedAt || 0));
+      const oldestUpdate = Math.min(...cached.map((r) => r.updatedAt || 0));
       if (Date.now() - oldestUpdate > 60000 && !isScanning) {
         triggerBackgroundScan(config.targetRepoPath);
       }
@@ -85,10 +112,12 @@ router.get('/repos', async (ctx) => {
     }
   }
 
-  // 强制物理扫描并回写 SQLite 数据库
+  // 强制物理扫描 -> 原子落库 SQLite 数据库 -> 从数据库返回前端
   const repos = await git.scanAllRepos(config.targetRepoPath);
-  db.saveCachedRepos(repos);
-  ctx.body = { success: true, data: repos, source: 'live' };
+  db.refreshReposCache(repos);
+  const cached = db.getCachedRepos();
+  broadcast({ type: 'repos_updated', data: cached });
+  ctx.body = { success: true, data: cached, source: 'live' };
 });
 
 router.post('/git/fetch', async (ctx) => {
@@ -96,22 +125,35 @@ router.post('/git/fetch', async (ctx) => {
   const config = getConfig();
   if (repoPath) {
     const res = await git.fetchRepo(repoPath);
-    triggerBackgroundScan(config.targetRepoPath);
-    ctx.body = res;
+    // 重新扫描并原子落库，然后返回落库数据
+    const scanned = await git.scanAllRepos(config.targetRepoPath);
+    db.refreshReposCache(scanned);
+    const cached = db.getCachedRepos();
+    broadcast({ type: 'repos_updated', data: cached });
+    ctx.body = { ...res, repos: cached };
   } else {
     // 全局 fetch：从 SQLite 获取仓库列表并并发执行 git fetch -p
     const cached = db.getCachedRepos();
-    const reposToFetch = (cached && cached.length > 0)
-      ? cached
-      : await git.scanAllRepos(config.targetRepoPath);
+    const reposToFetch =
+      cached && cached.length > 0
+        ? cached
+        : await git.scanAllRepos(config.targetRepoPath);
 
     await Promise.all(
-      reposToFetch.filter(r => r.isGit).map(r => git.fetchRepo(r.path))
+      reposToFetch.filter((r) => r.isGit).map((r) => git.fetchRepo(r.path))
     );
 
-    // 异步触发后台重扫写入 SQLite 并推送 WebSocket 最新数据
-    triggerBackgroundScan(config.targetRepoPath);
-    ctx.body = { success: true, message: '已完成全部子仓库远程分支刷新 (git fetch -p)' };
+    // 重新扫描、先落库、再把落库数据返回前端
+    const scanned = await git.scanAllRepos(config.targetRepoPath);
+    db.refreshReposCache(scanned);
+    const freshCached = db.getCachedRepos();
+    broadcast({ type: 'repos_updated', data: freshCached });
+    ctx.body = {
+      success: true,
+      data: freshCached,
+      repos: freshCached,
+      message: '已完成全部子仓库远程分支刷新并更新数据库！',
+    };
   }
 });
 
@@ -123,8 +165,12 @@ router.post('/git/checkout', async (ctx) => {
   const res = await git.checkoutRepo(repoPath, branch, { force });
   if (res.success) {
     db.updateRepoBranch(repoPath, branch);
+    const cached = db.getCachedRepos();
+    broadcast({ type: 'repos_updated', data: cached });
+    ctx.body = { ...res, repos: cached };
+  } else {
+    ctx.body = res;
   }
-  ctx.body = res;
 });
 
 router.post('/git/batch-checkout', async (ctx) => {
@@ -139,13 +185,24 @@ router.post('/git/batch-checkout', async (ctx) => {
       db.updateRepoBranch(r.path, branch.trim());
     }
   }
-  ctx.body = { success: true, data: results };
+  const cached = db.getCachedRepos();
+  broadcast({ type: 'repos_updated', data: cached });
+  ctx.body = { success: true, data: results, repos: cached };
 });
 
 router.post('/git/stash', async (ctx) => {
   const { repoPath } = ctx.request.body || {};
   if (!repoPath) ctx.throw(400, '缺少 repoPath 参数');
   const res = await git.stashRepo(repoPath);
+  if (res.success) {
+    const config = getConfig();
+    const fresh = await git.scanAllRepos(config.targetRepoPath);
+    db.refreshReposCache(fresh);
+    const cached = db.getCachedRepos();
+    broadcast({ type: 'repos_updated', data: cached });
+    ctx.body = { ...res, repos: cached };
+    return;
+  }
   ctx.body = res;
 });
 
@@ -153,15 +210,24 @@ router.post('/git/reset', async (ctx) => {
   const { repoPath } = ctx.request.body || {};
   if (!repoPath) ctx.throw(400, '缺少 repoPath 参数');
   const res = await git.resetRepo(repoPath);
+  if (res.success) {
+    const config = getConfig();
+    const fresh = await git.scanAllRepos(config.targetRepoPath);
+    db.refreshReposCache(fresh);
+    const cached = db.getCachedRepos();
+    broadcast({ type: 'repos_updated', data: cached });
+    ctx.body = { ...res, repos: cached };
+    return;
+  }
   ctx.body = res;
 });
 
 router.post('/git/prune', async (ctx) => {
   const { repoPath } = ctx.request.body || {};
   const config = getConfig();
+  let resData;
   if (repoPath) {
-    const res = await git.pruneBranches(repoPath, config.protectedBranches);
-    ctx.body = { success: true, data: res };
+    resData = await git.pruneBranches(repoPath, config.protectedBranches);
   } else {
     // 全量清理所有子仓
     const repos = await git.scanAllRepos(config.targetRepoPath);
@@ -172,8 +238,19 @@ router.post('/git/prune', async (ctx) => {
         summary.push({ name: r.name, ...pRes });
       }
     }
-    ctx.body = { success: true, data: summary, message: '全局失效及已合并分支清理完毕' };
+    resData = summary;
   }
+  // 先落库最新分支状态，再返回前端
+  const freshRepos = await git.scanAllRepos(config.targetRepoPath);
+  db.refreshReposCache(freshRepos);
+  const cached = db.getCachedRepos();
+  broadcast({ type: 'repos_updated', data: cached });
+  ctx.body = {
+    success: true,
+    data: resData,
+    repos: cached,
+    message: '全局失效及已合并分支清理完毕并更新数据库',
+  };
 });
 
 router.get('/git/local-branches', async (ctx) => {
@@ -192,8 +269,17 @@ router.post('/git/delete-branches', async (ctx) => {
     ctx.throw(400, '缺少 repoPath 或 branches 数组');
   }
   const config = getConfig();
-  const res = await git.deleteSpecificBranches(repoPath, branches, config.protectedBranches);
-  ctx.body = { success: true, data: res };
+  const res = await git.deleteSpecificBranches(
+    repoPath,
+    branches,
+    config.protectedBranches
+  );
+  // 删除分支后，重新扫描，落库更新并返回
+  const freshRepos = await git.scanAllRepos(config.targetRepoPath);
+  db.refreshReposCache(freshRepos);
+  const cached = db.getCachedRepos();
+  broadcast({ type: 'repos_updated', data: cached });
+  ctx.body = { success: true, data: res, repos: cached };
 });
 
 // --- 构建调度 ---
