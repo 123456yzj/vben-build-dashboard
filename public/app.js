@@ -71,6 +71,11 @@ createApp({
     const branchDrawer = reactive({
       show: false,
       repo: null,
+      loading: false,
+      keyword: '',
+      onlyMergedOrGone: false,
+      branches: [],
+      currentBranch: '',
       selected: [],
     });
 
@@ -79,6 +84,25 @@ createApp({
 
     // 计算属性
     const businessRepos = computed(() => repos.value.filter(r => !r.isRoot));
+
+    const filteredLocalBranches = computed(() => {
+      let list = branchDrawer.branches || [];
+      const kw = (branchDrawer.keyword || '').trim().toLowerCase();
+      if (kw) {
+        list = list.filter(b =>
+          (b.name && b.name.toLowerCase().includes(kw)) ||
+          (b.subject && b.subject.toLowerCase().includes(kw))
+        );
+      }
+      if (branchDrawer.onlyMergedOrGone) {
+        list = list.filter(b => b.isMerged || b.isGone);
+      }
+      return list;
+    });
+
+    const deletableFilteredCount = computed(() => {
+      return filteredLocalBranches.value.filter(b => b.canDelete).length;
+    });
 
     const buildStatusText = computed(() => {
       switch (buildStatus.status) {
@@ -339,14 +363,47 @@ createApp({
       }
     };
 
+    const selectAllDeletable = () => {
+      const deletableNames = filteredLocalBranches.value
+        .filter(b => b.canDelete)
+        .map(b => b.name);
+      branchDrawer.selected = Array.from(new Set([...branchDrawer.selected, ...deletableNames]));
+    };
+
+    const loadLocalBranches = async (repoPath) => {
+      if (!repoPath) return;
+      branchDrawer.loading = true;
+      try {
+        const res = await fetch(`/api/git/local-branches?repoPath=${encodeURIComponent(repoPath)}`);
+        const json = await res.json();
+        if (json.success && json.data) {
+          branchDrawer.currentBranch = json.data.currentBranch || '';
+          branchDrawer.branches = json.data.branches || [];
+          const validNames = new Set(branchDrawer.branches.filter(b => b.canDelete).map(b => b.name));
+          branchDrawer.selected = branchDrawer.selected.filter(name => validNames.has(name));
+        } else {
+          showToast('获取本地分支列表失败: ' + (json.message || '未知错误'), 'error');
+        }
+      } catch (err) {
+        showToast('获取本地分支列表失败: ' + err.message, 'error');
+      } finally {
+        branchDrawer.loading = false;
+      }
+    };
+
     const openBranchDrawer = (repo) => {
       branchDrawer.repo = repo;
       branchDrawer.selected = [];
+      branchDrawer.keyword = '';
+      branchDrawer.onlyMergedOrGone = false;
+      branchDrawer.branches = [];
       branchDrawer.show = true;
+      loadLocalBranches(repo.path);
     };
 
     const pruneRepoBranches = async (repo) => {
       try {
+        showToast('正在清理本地已合并/失效分支...');
         const res = await fetch('/api/git/prune', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -354,18 +411,42 @@ createApp({
         });
         const json = await res.json();
         if (json.success) {
-          showToast(json.data?.message || '清理完成！');
+          showToast(json.data?.message || '本地分支清理完成！');
           await loadRepos();
-          branchDrawer.repo = repos.value.find(r => r.name === repo.name);
+          await loadLocalBranches(repo.path);
         }
       } catch (err) {
         showToast('清理失败: ' + err.message, 'error');
       }
     };
 
+    const deleteSingleBranch = async (branchName) => {
+      if (!confirm(`确定删除本地分支 "${branchName}" 吗？此操作不可逆（仅在本地删除，不影响远程）。`)) return;
+      try {
+        const res = await fetch('/api/git/delete-branches', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            repoPath: branchDrawer.repo.path,
+            branches: [branchName],
+          }),
+        });
+        const json = await res.json();
+        if (json.success) {
+          showToast(`已删除本地分支 ${branchName}`);
+          await loadRepos();
+          await loadLocalBranches(branchDrawer.repo.path);
+        } else {
+          showToast('删除失败: ' + (json.message || '未知错误'), 'error');
+        }
+      } catch (err) {
+        showToast('删除失败: ' + err.message, 'error');
+      }
+    };
+
     const deleteSelectedBranches = async () => {
       if (branchDrawer.selected.length === 0) return;
-      if (!confirm(`确定彻底删除选中的 ${branchDrawer.selected.length} 个分支吗？`)) return;
+      if (!confirm(`确定彻底删除选中的 ${branchDrawer.selected.length} 个本地分支吗？此操作仅在本地生效，不影响远程仓库。`)) return;
 
       try {
         const res = await fetch('/api/git/delete-branches', {
@@ -378,10 +459,10 @@ createApp({
         });
         const json = await res.json();
         if (json.success) {
-          showToast(`已删除 ${json.data.deleted?.length || 0} 个分支`);
+          showToast(`已删除 ${json.data.deleted?.length || 0} 个本地分支`);
           await loadRepos();
-          branchDrawer.repo = repos.value.find(r => r.name === branchDrawer.repo.name);
           branchDrawer.selected = [];
+          await loadLocalBranches(branchDrawer.repo.path);
         }
       } catch (err) {
         showToast('删除失败: ' + err.message, 'error');
@@ -663,6 +744,11 @@ createApp({
       executeBatchCheckout,
       pruneAllMergedBranches,
       openBranchDrawer,
+      loadLocalBranches,
+      selectAllDeletable,
+      deleteSingleBranch,
+      filteredLocalBranches,
+      deletableFilteredCount,
       pruneRepoBranches,
       deleteSelectedBranches,
       isProtectedBranch,

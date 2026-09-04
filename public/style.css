@@ -311,6 +311,48 @@ body {
   color: #34d399;
   border: 1px solid rgba(16, 185, 129, 0.3);
 }
+.badge-merged {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+.badge-gone {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+.badge-protected {
+  background: rgba(168, 85, 247, 0.18);
+  color: #d8b4fe;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+}
+
+.branch-scope-notice {
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: #93c5fd;
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+
+.branch-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-color);
+  background: #131d31;
+  transition: background 0.15s ease;
+}
+.branch-item:hover {
+  background: #17233c;
+}
+.branch-item:last-child {
+  border-bottom: none;
+}
 
 .commit-info {
   background: #141f32;

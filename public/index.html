@@ -279,36 +279,129 @@
       </div>
     </div>
 
-    <!-- 弹窗 3：分支维护面板 -->
+    <!-- 弹窗 3：本地分支维护面板（严格仅本地分支） -->
     <div class="modal-overlay" v-if="branchDrawer.show">
-      <div class="modal-content" style="max-width: 700px;">
+      <div class="modal-content" style="max-width: 780px;">
         <div class="modal-header">
-          <h3 class="modal-title">🌿 分支维护: {{ branchDrawer.repo?.name }}</h3>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <h3 class="modal-title">🌿 本地分支维护</h3>
+            <span class="badge badge-branch">{{ branchDrawer.repo?.name }}</span>
+          </div>
           <button class="btn btn-default btn-sm" @click="branchDrawer.show = false">✕</button>
         </div>
-        <div class="modal-body">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <button class="btn btn-warning btn-sm" @click="pruneRepoBranches(branchDrawer.repo)">
-              一键清理该包已合并/失效分支
-            </button>
-            <button class="btn btn-danger btn-sm" @click="deleteSelectedBranches" :disabled="branchDrawer.selected.length === 0">
-              批量删除选中分支 ({{ branchDrawer.selected.length }})
+        <div class="modal-body" style="max-height: 70vh;">
+          <!-- 作用域与安全性明确说明 -->
+          <div class="branch-scope-notice">
+            <div style="font-weight: 600; margin-bottom: 2px;">🛡️ 仅本地分支维护说明</div>
+            <div>
+              本功能<strong>严格仅扫描与操作当前机器的本地分支（refs/heads/*）</strong>，绝不会向 Git 远程仓库发起任何删除或推送命令。
+              当前检出的分支及受保护分支（如 master/main/develop 等）已受系统强制锁定保护。
+            </div>
+          </div>
+
+          <!-- 检索与筛选栏 -->
+          <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+            <input
+              type="text"
+              v-model="branchDrawer.keyword"
+              placeholder="搜索本地分支名 / 提交说明..."
+              style="flex: 1; min-width: 200px;"
+            >
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; color: var(--text-muted); user-select: none;">
+              <input type="checkbox" v-model="branchDrawer.onlyMergedOrGone">
+              <span>仅看已合并 / 远程失效</span>
+            </label>
+            <button class="btn btn-default btn-sm" @click="loadLocalBranches(branchDrawer.repo.path)" :disabled="branchDrawer.loading">
+              {{ branchDrawer.loading ? '刷新中...' : '刷新本地分支' }}
             </button>
           </div>
 
+          <!-- 批量操作与快速清理栏 -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <button
+                class="btn btn-default btn-sm"
+                @click="selectAllDeletable"
+                :disabled="deletableFilteredCount === 0"
+              >
+                全选当前可清理 ({{ deletableFilteredCount }})
+              </button>
+              <button
+                class="btn btn-default btn-sm"
+                @click="branchDrawer.selected = []"
+                :disabled="branchDrawer.selected.length === 0"
+              >
+                取消选择
+              </button>
+              <span style="font-size: 12px; color: var(--text-muted);" v-if="branchDrawer.selected.length > 0">
+                已选 {{ branchDrawer.selected.length }} 个
+              </span>
+            </div>
+
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <button class="btn btn-warning btn-sm" @click="pruneRepoBranches(branchDrawer.repo)">
+                一键清理已合并/失效分支
+              </button>
+              <button class="btn btn-danger btn-sm" @click="deleteSelectedBranches" :disabled="branchDrawer.selected.length === 0">
+                批量删除选中分支 ({{ branchDrawer.selected.length }})
+              </button>
+            </div>
+          </div>
+
+          <!-- 分支列表主体 -->
           <div style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); overflow: hidden;">
-            <div v-for="b in branchDrawer.repo?.localBranches" :key="b"
-              style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border-color); background: #131d31;">
-              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                <input type="checkbox" :value="b" v-model="branchDrawer.selected" :disabled="isProtectedBranch(b) || b === branchDrawer.repo?.currentBranch">
-                <span :style="{ fontWeight: b === branchDrawer.repo?.currentBranch ? 'bold' : 'normal' }">{{ b }}</span>
-              </label>
-              <div>
-                <span class="badge badge-branch" v-if="b === branchDrawer.repo?.currentBranch">当前检出</span>
-                <span class="badge badge-dirty" v-else-if="isProtectedBranch(b)">受保护</span>
+            <div v-if="branchDrawer.loading" style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 13px;">
+              正在查询本地分支状态...
+            </div>
+            <div v-else-if="filteredLocalBranches.length === 0" style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 13px;">
+              未找到匹配的本地分支
+            </div>
+            <div
+              v-else
+              v-for="b in filteredLocalBranches"
+              :key="b.name"
+              class="branch-item"
+            >
+              <div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;">
+                <input
+                  type="checkbox"
+                  :value="b.name"
+                  v-model="branchDrawer.selected"
+                  :disabled="!b.canDelete"
+                  style="cursor: pointer;"
+                >
+                <div style="min-width: 0; flex: 1;">
+                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <span :style="{ fontWeight: b.isCurrent ? 'bold' : '500', color: b.isCurrent ? '#38bdf8' : '#e2e8f0' }">
+                      {{ b.name }}
+                    </span>
+                    <span class="badge badge-branch" v-if="b.isCurrent">当前检出</span>
+                    <span class="badge badge-protected" v-if="b.isProtected">受保护</span>
+                    <span class="badge badge-merged" v-if="b.isMerged">已合并</span>
+                    <span class="badge badge-gone" v-if="b.isGone">远程已删除</span>
+                  </div>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" v-if="b.subject">
+                    <span v-if="b.relativeDate" style="color: #94a3b8; margin-right: 6px;">{{ b.relativeDate }}</span>
+                    <span>{{ b.subject }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style="margin-left: 12px; display: flex; align-items: center; gap: 6px;">
+                <button
+                  class="btn btn-danger btn-sm"
+                  style="padding: 2px 8px; font-size: 11px;"
+                  v-if="b.canDelete"
+                  @click="deleteSingleBranch(b.name)"
+                >
+                  删除
+                </button>
               </div>
             </div>
           </div>
+        </div>
+        <div class="modal-footer" style="margin-bottom: 0;">
+          <button class="btn btn-default" @click="branchDrawer.show = false">关闭</button>
         </div>
       </div>
     </div>

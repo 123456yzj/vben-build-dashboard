@@ -125,6 +125,16 @@ router.post('/git/prune', async (ctx) => {
   }
 });
 
+router.get('/git/local-branches', async (ctx) => {
+  const { repoPath } = ctx.query;
+  if (!repoPath) {
+    ctx.throw(400, '缺少 repoPath 参数');
+  }
+  const config = getConfig();
+  const data = await git.getLocalBranchesDetail(repoPath, config.protectedBranches);
+  ctx.body = { success: true, data };
+});
+
 router.post('/git/delete-branches', async (ctx) => {
   const { repoPath, branches } = ctx.request.body || {};
   if (!repoPath || !Array.isArray(branches)) {
