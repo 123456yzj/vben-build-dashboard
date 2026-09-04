@@ -98,16 +98,11 @@ router.get('/repos', async (ctx) => {
   const config = getConfig();
   const force = ctx.query.force === 'true';
 
-  // 若非强制刷新，优先从 SQLite 缓存秒级响应 (<1ms)
+  // 若非强制刷新，优先从 SQLite 缓存秒级响应 (<1ms)，绝不触发耗时的后台磁盘扫描
   if (!force) {
     const cached = db.getCachedRepos();
     if (cached && cached.length > 0) {
       ctx.body = { success: true, data: cached, source: 'sqlite' };
-      // 检查最旧记录是否超过 60 秒，若过期则后台静默校准
-      const oldestUpdate = Math.min(...cached.map((r) => r.updatedAt || 0));
-      if (Date.now() - oldestUpdate > 60000 && !isScanning) {
-        triggerBackgroundScan(config.targetRepoPath);
-      }
       return;
     }
   }

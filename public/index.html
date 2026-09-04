@@ -21,8 +21,11 @@
       </div>
 
       <div class="header-actions">
-        <button class="btn btn-default" @click="fetchAndRefresh" :disabled="loading.refresh">
-          <span>🔄</span> {{ loading.refresh ? '刷新中...' : '刷新状态' }}
+        <button class="btn btn-default" @click="refreshFromDb" :disabled="loading.refresh" title="极速从本地 SQLite 数据库读取最新快照（0毫秒秒开，不扫描磁盘）">
+          <span>⚡</span> {{ loading.refresh ? '读取中...' : '刷新大盘 (DB)' }}
+        </button>
+        <button class="btn btn-default" @click="fetchRemoteBranches" :disabled="loading.refresh" title="向远程仓库抓取最新分支并同步入库 (git fetch -p)">
+          <span>📥</span> 抓取远程分支
         </button>
         <button class="btn btn-default" @click="openBatchCheckoutModal">
           <span>🔀</span> 联动切分支
@@ -135,9 +138,9 @@
               ⚡ SQLite 秒开
             </span>
           </div>
-          <button class="btn btn-default btn-sm" @click="fetchAndRefresh(true)" :disabled="loading.refresh" title="穿透数据库执行底层全量物理扫描">
+          <button class="btn btn-default btn-sm" @click="forcePhysicalScan" :disabled="loading.refresh" title="穿透数据库执行底层全量物理扫描（仅在必要时校准）">
             <span :class="{ 'spinning': loading.refresh }">🔄</span>
-            <span>{{ loading.refresh ? '正在扫描...' : '强制全量重扫' }}</span>
+            <span>{{ loading.refresh ? '正在扫描...' : '底层物理重扫' }}</span>
           </button>
         </div>
 

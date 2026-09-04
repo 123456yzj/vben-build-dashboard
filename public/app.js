@@ -205,16 +205,21 @@ createApp({
       } catch (err) {}
     };
 
-    const fetchAndRefresh = async (forceScanOnly = false) => {
+    // 1. 极速从 SQLite 数据库刷新大盘快照（0毫秒秒开，纯只读数据库，绝不扫描底层磁盘）
+    const refreshFromDb = async () => {
+      loading.refresh = true;
+      try {
+        await loadRepos(false);
+        showToast('已从 SQLite 数据库极速刷新最新快照！');
+      } finally {
+        loading.refresh = false;
+      }
+    };
+
+    // 2. 抓取远程最新分支并同步入库
+    const fetchRemoteBranches = async () => {
       try {
         loading.refresh = true;
-        if (forceScanOnly) {
-          showToast('正在执行底层 Git 全量物理重新扫描...');
-          await loadRepos(true);
-          showToast('已强制刷新最新的 Git 状态并同步回写 SQLite 数据库！');
-          return;
-        }
-
         showToast('正在同步远程最新分支 (git fetch -p)...');
         const res = await fetch('/api/git/fetch', {
           method: 'POST',
@@ -228,15 +233,37 @@ createApp({
           for (const r of json.repos) {
             targetBranches[r.name] = r.currentBranch;
           }
+          showToast('已完成全局远程分支抓取并落库！');
         } else {
-          await loadRepos(true);
+          showToast('同步失败: ' + (json.message || '未知错误'), 'error');
         }
-        showToast('已完成全局远程分支刷新与数据库同步！');
       } catch (err) {
         showToast('刷新失败: ' + err.message, 'error');
       } finally {
         loading.refresh = false;
       }
+    };
+
+    // 3. 强制穿透数据库执行底层全量物理扫描（仅供手动校准使用）
+    const forcePhysicalScan = async () => {
+      try {
+        loading.refresh = true;
+        showToast('正在穿透数据库，执行底层 Git 全量物理重扫...');
+        await loadRepos(true);
+        showToast('已强制刷新最新的 Git 状态并同步回写 SQLite 数据库！');
+      } catch (err) {
+        showToast('重扫失败: ' + err.message, 'error');
+      } finally {
+        loading.refresh = false;
+      }
+    };
+
+    // 兼容历史调用：若显式传入布尔值 true 则执行重扫，否则一律执行极速数据库刷新（安全避免 PointerEvent 误判）
+    const fetchAndRefresh = async (forceScanOnly = false) => {
+      if (typeof forceScanOnly === 'boolean' && forceScanOnly) {
+        return forcePhysicalScan();
+      }
+      return refreshFromDb();
     };
 
     // ==================== Git 分支操作 ====================
@@ -801,6 +828,9 @@ createApp({
       clearConsole,
       downloadZip,
       syncSingle,
+      refreshFromDb,
+      fetchRemoteBranches,
+      forcePhysicalScan,
       fetchAndRefresh,
       checkoutSingle,
       fetchSingle,
