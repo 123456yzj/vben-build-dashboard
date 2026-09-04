@@ -18,3 +18,5 @@ services:
       - ${HOST_DEPLOY_PATH:-/var/www}:/var/www
       # 3. 持久化工具配置
       - ./config.json:/app/config.json
+      # 4. 持久化 SQLite 数据库文件
+      - ./data:/app/data

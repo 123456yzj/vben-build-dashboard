@@ -129,10 +129,26 @@
 
         <!-- 仓库与子包状态卡片 -->
         <div class="section-title">
-          <span>📦 业务子包与分支状态 ({{ repos.length }})</span>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span>📦 业务子包与分支状态 ({{ repos.length }})</span>
+            <span class="badge badge-clean" v-if="repoSource === 'sqlite'" style="font-size: 11px; padding: 1px 6px;">
+              ⚡ SQLite 秒开
+            </span>
+          </div>
+          <button class="btn btn-default btn-sm" @click="fetchAndRefresh(true)" :disabled="loading.refresh" title="穿透数据库执行底层全量物理扫描">
+            <span :class="{ 'spinning': loading.refresh }">🔄</span>
+            <span>{{ loading.refresh ? '正在扫描...' : '强制全量重扫' }}</span>
+          </button>
         </div>
 
-        <div class="repo-grid">
+        <!-- 首次加载空状态/扫描占位骨架 -->
+        <div v-if="loading.refresh && repos.length === 0" style="padding: 40px; text-align: center; background: var(--bg-card); border: 1px dashed var(--border-color); border-radius: var(--radius-md); color: var(--text-muted); margin-bottom: 20px;">
+          <div class="spinning" style="display: inline-block; font-size: 26px; margin-bottom: 10px;">⏳</div>
+          <div style="font-size: 14px; font-weight: 600; color: #cbd5e1;">正在从底层 Git 扫描各子包及分支...</div>
+          <div style="font-size: 12px; margin-top: 6px; color: #64748b;">扫描完成后将自动持久化写入 SQLite 数据库，后续刷新即可 0 毫秒秒开</div>
+        </div>
+
+        <div class="repo-grid" v-else>
           <div v-for="repo in repos" :key="repo.path" class="repo-card" :class="{ selected: selectedPackages.includes(repo.packageName) }">
             <div class="repo-card-header">
               <div class="repo-name-area">

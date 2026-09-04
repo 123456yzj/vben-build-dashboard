@@ -13,6 +13,7 @@ import { buildManager } from './lib/build.mjs';
 import * as monitor from './lib/monitor.mjs';
 import * as nvm from './lib/nvm.mjs';
 import * as sync from './lib/sync.mjs';
+import * as db from './lib/db.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,6 +38,22 @@ app.use(async (ctx, next) => {
 app.use(bodyParser());
 app.use(serve(path.join(__dirname, 'public')));
 
+// ==================== 后台 Git 异步扫描任务 ====================
+let isScanning = false;
+async function triggerBackgroundScan(targetRepoPath) {
+  if (isScanning) return;
+  isScanning = true;
+  try {
+    const repos = await git.scanAllRepos(targetRepoPath);
+    db.saveCachedRepos(repos);
+    broadcast({ type: 'repos_updated', data: repos });
+  } catch (err) {
+    console.error('[BackgroundScan] 自动更新失败:', err.message);
+  } finally {
+    isScanning = false;
+  }
+}
+
 // ==================== API 路由 ====================
 
 // --- 配置管理 ---
@@ -49,11 +66,29 @@ router.post('/config', async (ctx) => {
   ctx.body = { success: true, data: updated, message: '配置已成功更新保存' };
 });
 
-// --- 仓库与分支大盘 ---
+// --- 仓库与分支大盘 (基于 SQLite 极速秒开) ---
 router.get('/repos', async (ctx) => {
   const config = getConfig();
+  const force = ctx.query.force === 'true';
+
+  // 若非强制刷新，优先从 SQLite 缓存秒级响应 (<1ms)
+  if (!force) {
+    const cached = db.getCachedRepos();
+    if (cached && cached.length > 0) {
+      ctx.body = { success: true, data: cached, source: 'sqlite' };
+      // 检查最旧记录是否超过 60 秒，若过期则后台静默校准
+      const oldestUpdate = Math.min(...cached.map(r => r.updatedAt || 0));
+      if (Date.now() - oldestUpdate > 60000 && !isScanning) {
+        triggerBackgroundScan(config.targetRepoPath);
+      }
+      return;
+    }
+  }
+
+  // 强制物理扫描并回写 SQLite 数据库
   const repos = await git.scanAllRepos(config.targetRepoPath);
-  ctx.body = { success: true, data: repos };
+  db.saveCachedRepos(repos);
+  ctx.body = { success: true, data: repos, source: 'live' };
 });
 
 router.post('/git/fetch', async (ctx) => {
@@ -61,6 +96,7 @@ router.post('/git/fetch', async (ctx) => {
   const config = getConfig();
   if (repoPath) {
     const res = await git.fetchRepo(repoPath);
+    triggerBackgroundScan(config.targetRepoPath);
     ctx.body = res;
   } else {
     // 全局 fetch
@@ -68,6 +104,8 @@ router.post('/git/fetch', async (ctx) => {
     for (const r of repos) {
       if (r.isGit) await git.fetchRepo(r.path);
     }
+    const freshRepos = await git.scanAllRepos(config.targetRepoPath);
+    db.saveCachedRepos(freshRepos);
     ctx.body = { success: true, message: '已完成全部子仓库远程分支刷新 (git fetch -p)' };
   }
 });
@@ -78,6 +116,9 @@ router.post('/git/checkout', async (ctx) => {
     ctx.throw(400, '缺少 repoPath 或 branch 参数');
   }
   const res = await git.checkoutRepo(repoPath, branch, { force });
+  if (res.success) {
+    db.updateRepoBranch(repoPath, branch);
+  }
   ctx.body = res;
 });
 
@@ -88,6 +129,11 @@ router.post('/git/batch-checkout', async (ctx) => {
   }
   const config = getConfig();
   const results = await git.batchCheckoutAll(config.targetRepoPath, branch.trim());
+  for (const r of results) {
+    if (r.success) {
+      db.updateRepoBranch(r.path, branch.trim());
+    }
+  }
   ctx.body = { success: true, data: results };
 });
 
@@ -167,6 +213,17 @@ router.post('/build', async (ctx) => {
     maxMemoryMb,
     nodeBinPath,
   }).then(async (res) => {
+    // 写入 SQLite 构建历史
+    db.saveBuildRecord({
+      packages,
+      mode,
+      status: res && res.success ? 'success' : 'failed',
+      startTime: res?.startTime || Date.now(),
+      durationSec: res?.durationSec || 0,
+      nodeVersion,
+      maxMemoryMb,
+    });
+
     // 若开启了“构建成功后自动定向传输”
     if (res && res.success && config.autoDeployAfterBuild && config.deployTargets) {
       for (const [pkg, targetDir] of Object.entries(config.deployTargets)) {
@@ -188,6 +245,11 @@ router.post('/build', async (ctx) => {
     success: true,
     message: '构建任务已成功加入调度执行，请通过控制台查看实时日志',
   };
+});
+
+router.get('/build/history', async (ctx) => {
+  const limit = parseInt(ctx.query.limit || '20', 10);
+  ctx.body = { success: true, data: db.getBuildHistory(limit) };
 });
 
 router.post('/build/abort', async (ctx) => {
@@ -358,4 +420,17 @@ server.listen(PORT, HOST, () => {
   console.log(`🌐 本地访问: http://localhost:${PORT}`);
   console.log(`📁 目标项目: ${config.targetRepoPath}`);
   console.log('====================================================');
+
+  // SQLite 数据库缓存自检与预热
+  try {
+    const cached = db.getCachedRepos();
+    if (!cached || cached.length === 0) {
+      console.log('[SQLite] 缓存为空，开始执行首次后台预热扫描...');
+      triggerBackgroundScan(config.targetRepoPath);
+    } else {
+      console.log(`[SQLite] 已从数据库加载 ${cached.length} 个子仓快照缓存`);
+    }
+  } catch (err) {
+    console.warn('[SQLite] 数据库初始化提示:', err.message);
+  }
 });

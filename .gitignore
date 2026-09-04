@@ -4,3 +4,4 @@ dist/
 .DS_Store
 config.json
 !config.example.json
+data/

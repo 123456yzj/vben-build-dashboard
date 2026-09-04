@@ -81,6 +81,7 @@ createApp({
 
     const showEnvModal = ref(false);
     const showSettingsModal = ref(false);
+    const repoSource = ref('');
 
     // 计算属性
     const businessRepos = computed(() => repos.value.filter(r => !r.isRoot));
@@ -171,13 +172,15 @@ createApp({
       }
     };
 
-    const loadRepos = async () => {
+    const loadRepos = async (force = false) => {
       loading.refresh = true;
       try {
-        const res = await fetch('/api/repos');
+        const url = force ? '/api/repos?force=true' : '/api/repos';
+        const res = await fetch(url);
         const json = await res.json();
         if (json.success && json.data) {
           repos.value = json.data;
+          repoSource.value = json.source || 'sqlite';
           // 初始化 targetBranches
           for (const r of json.data) {
             if (!targetBranches[r.name]) {
@@ -202,16 +205,24 @@ createApp({
       } catch (err) {}
     };
 
-    const fetchAndRefresh = async () => {
+    const fetchAndRefresh = async (forceScanOnly = false) => {
       try {
         loading.refresh = true;
+        if (forceScanOnly) {
+          showToast('正在执行底层 Git 全量物理重新扫描...');
+          await loadRepos(true);
+          showToast('已强制刷新最新的 Git 状态并同步回写 SQLite 数据库！');
+          return;
+        }
+
+        showToast('正在同步远程最新分支 (git fetch -p)...');
         await fetch('/api/git/fetch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({}),
         });
-        await loadRepos();
-        showToast('已完成全局远程分支刷新！');
+        await loadRepos(true);
+        showToast('已完成全局远程分支刷新与数据库同步！');
       } catch (err) {
         showToast('刷新失败: ' + err.message, 'error');
       } finally {
@@ -680,10 +691,18 @@ createApp({
           } else if (msg.type === 'build_status') {
             Object.assign(buildStatus, msg.data);
             if (msg.data.status === 'success' || msg.data.status === 'failed') {
-              loadRepos(); // 自动刷新仓库状态
+              loadRepos(true); // 自动刷新仓库状态并同步数据库
             }
           } else if (msg.type === 'memory') {
             Object.assign(memory, msg.data);
+          } else if (msg.type === 'repos_updated') {
+            repos.value = msg.data;
+            repoSource.value = 'sqlite';
+            for (const r of msg.data) {
+              if (!targetBranches[r.name]) {
+                targetBranches[r.name] = r.currentBranch;
+              }
+            }
           }
         } catch (err) {}
       };
@@ -694,17 +713,20 @@ createApp({
       };
     };
 
-    // 初始化
+    // 初始化：并行发出请求，秒级渲染
     onMounted(async () => {
-      await loadConfig();
-      await loadRepos();
-      await loadRuntime();
+      await Promise.all([
+        loadConfig(),
+        loadRepos(false),
+        loadRuntime(),
+      ]);
       connectWebSocket();
     });
 
     return {
       config,
       repos,
+      repoSource,
       businessRepos,
       targetBranches,
       selectedPackages,
