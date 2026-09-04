@@ -485,77 +485,51 @@
         <div class="modal-body">
           <!-- 1. 目标 Monorepo 根路径 -->
           <div style="margin-bottom: 16px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-              <label style="font-weight: 600;">目标 Monorepo 根路径: <span style="color: #ef4444;">*</span></label>
-              <span style="font-size: 11px; color: var(--text-muted);">自动检测物理存在性与工程标记</span>
-            </div>
+            <label style="display: block; font-weight: 600; margin-bottom: 6px;">
+              目标 Monorepo 根路径:
+            </label>
             <input
               type="text"
               v-model="config.targetRepoPath"
-              @input="onTargetRepoPathInput"
-              @blur="onTargetRepoPathBlur"
-              :class="{
-                'input-error': validation.targetRepoPath.status === 'invalid',
-                'input-success': validation.targetRepoPath.status === 'valid',
-                'input-loading': validation.targetRepoPath.status === 'validating'
-              }"
+              @input="clearFieldError('targetRepoPath')"
+              :class="{ 'input-error': fieldErrors.targetRepoPath }"
               placeholder="例如: D:/project/impact/app-v1/web-framework 或 /mnt/d/..."
               style="width: 100%;"
             >
-            <!-- 实时就地校验提示 -->
-            <div
-              class="field-feedback"
-              :class="validation.targetRepoPath.status"
-              v-if="validation.targetRepoPath.message"
-            >
-              <span class="spinner-sm" v-if="validation.targetRepoPath.status === 'validating'"></span>
-              <span>{{ validation.targetRepoPath.message }}</span>
-            </div>
-            <div class="field-help" v-else>
-              输入前端 Monorepo 项目所在目录。路径变更保存后系统将自动重新扫描子仓并同步写入数据库。
+            <div class="field-feedback" v-if="fieldErrors.targetRepoPath">
+              ⚠️ {{ fieldErrors.targetRepoPath }}
             </div>
           </div>
 
           <!-- 2. 受保护分支白名单 -->
           <div style="margin-bottom: 16px;">
-            <label style="display: block; font-weight: 600; margin-bottom: 6px;">受保护分支白名单 (逗号分隔):</label>
+            <label style="display: block; font-weight: 600; margin-bottom: 6px;">
+              受保护分支白名单 (逗号分隔):
+            </label>
             <input
               type="text"
               :value="config.protectedBranches?.join(', ')"
-              @input="onProtectedBranchesInput($event.target.value)"
-              :class="{
-                'input-error': validation.protectedBranches.status === 'invalid',
-                'input-success': validation.protectedBranches.status === 'valid'
-              }"
+              @input="updateProtectedBranches($event.target.value)"
+              :class="{ 'input-error': fieldErrors.protectedBranches }"
               placeholder="master, main, develop, test"
               style="width: 100%;"
             >
-            <div
-              class="field-feedback"
-              :class="validation.protectedBranches.status"
-              v-if="validation.protectedBranches.message"
-            >
-              <span>{{ validation.protectedBranches.message }}</span>
-            </div>
-            <div class="field-help" v-else>
-              受保护的分支在分支维护面板中受到强制锁定，不可被误删除或一键清理。
+            <div class="field-feedback" v-if="fieldErrors.protectedBranches">
+              ⚠️ {{ fieldErrors.protectedBranches }}
             </div>
           </div>
 
           <!-- 3. 构建默认最大内存 -->
           <div style="margin-bottom: 16px;">
             <label style="display: block; font-weight: 600; margin-bottom: 6px;">
-              构建默认最大内存 (MB): <span style="color: #ef4444;">*</span>
+              构建默认最大内存 (MB):
             </label>
             <div style="display: flex; align-items: center; gap: 10px;">
               <input
                 type="number"
                 v-model.number="config.maxMemoryMb"
-                @input="onMaxMemoryInput"
-                :class="{
-                  'input-error': validation.maxMemoryMb.status === 'invalid',
-                  'input-success': validation.maxMemoryMb.status === 'valid'
-                }"
+                @input="clearFieldError('maxMemoryMb')"
+                :class="{ 'input-error': fieldErrors.maxMemoryMb }"
                 min="512"
                 step="1024"
                 style="width: 140px;"
@@ -564,15 +538,8 @@
                 约 {{ (config.maxMemoryMb / 1024).toFixed(1) }} GB
               </span>
             </div>
-            <div
-              class="field-feedback"
-              :class="validation.maxMemoryMb.status"
-              v-if="validation.maxMemoryMb.message"
-            >
-              <span>{{ validation.maxMemoryMb.message }}</span>
-            </div>
-            <div class="field-help" v-else>
-              动态注入 NODE_OPTIONS=--max-old-space-size，防止大型 Monorepo 打包内存溢出（OOM）。
+            <div class="field-feedback" v-if="fieldErrors.maxMemoryMb">
+              ⚠️ {{ fieldErrors.maxMemoryMb }}
             </div>
           </div>
 
@@ -595,7 +562,7 @@
           <button
             class="btn btn-primary"
             @click="saveSystemSettings"
-            :disabled="!canSaveConfig || loading.refresh"
+            :disabled="loading.refresh"
           >
             {{ loading.refresh ? '正在保存...' : '保存配置' }}
           </button>

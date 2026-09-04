@@ -82,6 +82,7 @@ router.post('/config', async (ctx) => {
     ctx.status = 400;
     ctx.body = {
       success: false,
+      field: check.field || null,
       message: check.message || '配置数据校验未通过，请检查输入！',
     };
     return;

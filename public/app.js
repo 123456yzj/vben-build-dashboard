@@ -15,19 +15,10 @@ createApp({
       selectedNodeVersion: '',
     });
 
-    const validation = reactive({
-      targetRepoPath: {
-        status: 'idle', // 'idle' | 'validating' | 'valid' | 'invalid'
-        message: '',
-      },
-      maxMemoryMb: {
-        status: 'idle', // 'idle' | 'valid' | 'invalid'
-        message: '',
-      },
-      protectedBranches: {
-        status: 'idle', // 'idle' | 'valid' | 'warning'
-        message: '',
-      },
+    const fieldErrors = reactive({
+      targetRepoPath: '',
+      maxMemoryMb: '',
+      protectedBranches: '',
     });
 
     const repos = ref([]);
@@ -714,133 +705,58 @@ createApp({
       }
     };
 
-    // ==================== 系统配置字段就地校验逻辑 ====================
+    // ==================== 系统配置提交时校验逻辑 ====================
 
-    let repoPathTimer = null;
-    const validateRepoPath = (immediate = false) => {
-      if (repoPathTimer) {
-        clearTimeout(repoPathTimer);
-        repoPathTimer = null;
-      }
-
-      const runCheck = async () => {
-        const raw = (config.targetRepoPath || '').trim();
-        if (!raw) {
-          validation.targetRepoPath.status = 'invalid';
-          validation.targetRepoPath.message = '目标 Monorepo 根路径不能为空！';
-          return;
-        }
-
-        validation.targetRepoPath.status = 'validating';
-        validation.targetRepoPath.message = '正在检测物理路径与前端项目标记...';
-
-        try {
-          const res = await fetch('/api/config/validate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ targetRepoPath: raw }),
-          });
-          const json = await res.json();
-          if (json.valid) {
-            validation.targetRepoPath.status = 'valid';
-            validation.targetRepoPath.message = '✔ 路径合法，已检测到有效的前端工程标记 (package.json / .git)';
-          } else {
-            validation.targetRepoPath.status = 'invalid';
-            validation.targetRepoPath.message = '⚠️ ' + (json.message || '目标目录不存在或非有效项目');
-          }
-        } catch (err) {
-          validation.targetRepoPath.status = 'invalid';
-          validation.targetRepoPath.message = '⚠️ 校验接口请求异常: ' + err.message;
-        }
-      };
-
-      if (immediate) {
-        runCheck();
-      } else {
-        repoPathTimer = setTimeout(runCheck, 350);
+    const clearFieldError = (field) => {
+      if (fieldErrors[field]) {
+        fieldErrors[field] = '';
       }
     };
-
-    const onTargetRepoPathInput = () => {
-      validateRepoPath(false);
-    };
-
-    const onTargetRepoPathBlur = () => {
-      validateRepoPath(true);
-    };
-
-    const validateMemory = () => {
-      if (config.maxMemoryMb === '' || config.maxMemoryMb === null || config.maxMemoryMb === undefined) {
-        validation.maxMemoryMb.status = 'invalid';
-        validation.maxMemoryMb.message = '构建最大内存上限不能为空！';
-        return;
-      }
-      const num = Number(config.maxMemoryMb);
-      if (isNaN(num) || num < 512) {
-        validation.maxMemoryMb.status = 'invalid';
-        validation.maxMemoryMb.message = '⚠️ 构建内存上限不能低于 512 MB（推荐 4096 ~ 8192 MB）';
-      } else if (num > 32768) {
-        validation.maxMemoryMb.status = 'invalid';
-        validation.maxMemoryMb.message = '⚠️ 内存配置已超过 32768 MB (32 GB)，请确认物理内存是否充足';
-      } else {
-        validation.maxMemoryMb.status = 'valid';
-        validation.maxMemoryMb.message = '✔ 内存配置合理';
-      }
-    };
-
-    const onMaxMemoryInput = () => {
-      validateMemory();
-    };
-
-    const validateBranches = (str) => {
-      const list = String(str || '').split(',').map(s => s.trim()).filter(Boolean);
-      config.protectedBranches = list;
-      if (list.length === 0) {
-        validation.protectedBranches.status = 'warning';
-        validation.protectedBranches.message = '⚠️ 未配置任何受保护分支，所有本地分支均可被删除或清理（建议保留 master, main）';
-      } else {
-        validation.protectedBranches.status = 'valid';
-        validation.protectedBranches.message = `✔ 已配置 ${list.length} 个受保护分支（包含: ${list.slice(0, 3).join(', ')}${list.length > 3 ? '...' : ''}）`;
-      }
-    };
-
-    const onProtectedBranchesInput = (val) => {
-      validateBranches(val);
-    };
-
-    const canSaveConfig = computed(() => {
-      if (validation.targetRepoPath.status === 'invalid' || validation.targetRepoPath.status === 'validating') {
-        return false;
-      }
-      if (validation.maxMemoryMb.status === 'invalid') {
-        return false;
-      }
-      return true;
-    });
-
-    // 监听设置弹窗打开，立即进行一次全量字段状态初始化
-    watch(showSettingsModal, (isOpen) => {
-      if (isOpen) {
-        validateRepoPath(true);
-        validateMemory();
-        validateBranches(config.protectedBranches?.join(', ') || '');
-      }
-    });
 
     const updateProtectedBranches = (str) => {
-      validateBranches(str);
+      clearFieldError('protectedBranches');
+      config.protectedBranches = str.split(',').map(s => s.trim()).filter(Boolean);
     };
 
+    // 弹窗打开时清空旧的错误提示，保持干净界面
+    watch(showSettingsModal, (isOpen) => {
+      if (isOpen) {
+        fieldErrors.targetRepoPath = '';
+        fieldErrors.maxMemoryMb = '';
+        fieldErrors.protectedBranches = '';
+      }
+    });
+
     const saveSystemSettings = async () => {
-      // 1. 前置守卫检查
-      if (!canSaveConfig.value) {
-        showToast('请先按提示修正标红的配置项！', 'error');
+      // 1. 提交前清空所有字段报错
+      fieldErrors.targetRepoPath = '';
+      fieldErrors.maxMemoryMb = '';
+      fieldErrors.protectedBranches = '';
+
+      // 2. 前端基础合法性校验
+      const targetPath = (config.targetRepoPath || '').trim();
+      config.targetRepoPath = targetPath;
+      let hasError = false;
+
+      if (!targetPath) {
+        fieldErrors.targetRepoPath = '目标 Monorepo 根路径不能为空！';
+        hasError = true;
+      }
+
+      if (config.maxMemoryMb !== undefined && config.maxMemoryMb !== null && config.maxMemoryMb !== '') {
+        const memNum = Number(config.maxMemoryMb);
+        if (isNaN(memNum) || memNum < 512) {
+          fieldErrors.maxMemoryMb = '构建内存上限不能低于 512 MB！';
+          hasError = true;
+        }
+      }
+
+      if (hasError) {
+        showToast('配置项存在不合法内容，请根据标红提示修正！', 'error');
         return;
       }
 
-      const targetPath = (config.targetRepoPath || '').trim();
-      config.targetRepoPath = targetPath;
-
+      // 3. 发送保存请求，若后端返回不合法则精准标红对应输入项
       try {
         loading.refresh = true;
         showToast('正在校验并保存配置...');
@@ -864,6 +780,9 @@ createApp({
             await loadRepos(true);
           }
         } else {
+          // 提交时不合法：精准在对应输入框下方提示，输入框标红
+          const errField = json.field || 'targetRepoPath';
+          fieldErrors[errField] = json.message || '配置校验失败，请检查输入！';
           showToast('保存被拦截: ' + (json.message || '配置校验失败'), 'error');
         }
       } catch (err) {
@@ -994,13 +913,8 @@ createApp({
       updateProtectedBranches,
       saveSystemSettings,
       formatTime,
-      validation,
-      canSaveConfig,
-      onTargetRepoPathInput,
-      onTargetRepoPathBlur,
-      onMaxMemoryInput,
-      onProtectedBranchesInput,
-      validateRepoPath,
+      fieldErrors,
+      clearFieldError,
     };
   },
 }).mount('#app');

@@ -19,8 +19,10 @@ const server = net.createServer((clientSocket) => {
   clientSocket.pipe(targetSocket);
   targetSocket.pipe(clientSocket);
 
-  clientSocket.on('error', () => {});
-  targetSocket.on('error', () => {});
+  clientSocket.on('error', () => targetSocket.destroy());
+  targetSocket.on('error', () => clientSocket.destroy());
+  clientSocket.on('close', () => targetSocket.destroy());
+  targetSocket.on('close', () => clientSocket.destroy());
 });
 
 server.listen(9527, '0.0.0.0', () => {
