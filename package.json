@@ -1,21 +1,32 @@
 {
   "name": "vben-build-dashboard",
   "version": "1.0.0",
-  "description": "A lightweight web dashboard for managing branches and building monorepo projects on Ubuntu server",
+  "description": "A lightweight web dashboard for managing branches and building monorepo projects",
+  "private": true,
   "type": "module",
-  "main": "server.mjs",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
   "scripts": {
-    "start": "node server.mjs",
-    "dev": "node --watch server.mjs",
-    "bridge": "node bridge.cjs"
+    "dev": "concurrently -k -n backend,frontend -c yellow,cyan \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "dev:backend": "npm run dev -w backend",
+    "dev:frontend": "npm run dev -w frontend",
+    "build": "npm run build -w frontend && npm run build -w backend",
+    "build:backend": "npm run build -w backend",
+    "build:frontend": "npm run build -w frontend",
+    "typecheck": "npm run typecheck -w frontend && npm run typecheck -w backend",
+    "typecheck:backend": "npm run typecheck -w backend",
+    "typecheck:frontend": "npm run typecheck -w frontend",
+    "start": "npm run build && npm run start -w backend",
+    "start:backend": "npm run start -w backend",
+    "bridge": "npm run build -w backend && node backend/dist/bridge.js"
   },
-  "dependencies": {
-    "@koa/router": "^13.1.0",
-    "archiver": "^7.0.1",
-    "koa": "^2.15.3",
-    "koa-bodyparser": "^4.4.1",
-    "koa-static": "^5.0.0",
-    "ws": "^8.18.0"
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   },
   "keywords": [
     "monorepo",
@@ -25,6 +36,5 @@
     "pnpm",
     "turbo"
   ],
-  "author": "",
   "license": "MIT"
 }
