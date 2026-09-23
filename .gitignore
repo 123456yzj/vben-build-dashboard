@@ -1,7 +1,8 @@
 node_modules/
 **/node_modules/
+# Build output for both workspaces and TypeScript incremental builds
 dist/
-frontend/dist/
+*.tsbuildinfo
 *.log
 .DS_Store
 config.json
