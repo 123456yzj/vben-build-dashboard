@@ -1,0 +1,6 @@
+:root{font-family:var(--font-ui);color:var(--color-text);background:var(--color-background);font-synthesis:none}
+*{box-sizing:border-box}
+body{margin:0}
+button,select{font:inherit}
+button{cursor:pointer}
+button:disabled{opacity:.48;cursor:not-allowed}

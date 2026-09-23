@@ -41,3 +41,24 @@ export async function gitAction(project: Project, action: 'fetch' | 'pull' | 'ch
     await git(project, status.localBranches.includes(branch) ? ['switch', '--', branch] : ['switch', '--track', branch], output);
   }
 }
+
+export async function runGitAction(
+  project: Project,
+  action: 'fetch' | 'pull' | 'checkout',
+  branch: string | undefined,
+  busy: Set<string>,
+  output: Output,
+  publish: (event: object) => void,
+): Promise<GitStatus> {
+  busy.add(project.name);
+  publish({ type: 'busy', project: project.name, busy: true });
+  try {
+    await gitAction(project, action, branch, output);
+    const status = await getGitStatus(project);
+    publish({ type: 'git', project: project.name, git: status });
+    return status;
+  } finally {
+    busy.delete(project.name);
+    publish({ type: 'busy', project: project.name, busy: false });
+  }
+}

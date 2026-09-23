@@ -74,3 +74,31 @@ export async function runBuild(project: Project, record: BuildRecord, store: Bui
   }
   onStatus();
 }
+
+export async function startBuild(
+  project: Project,
+  store: BuildStore,
+  busy: Set<string>,
+  logs: Map<string, { stream: string; text: string; buildId: string }[]>,
+  outputFor: (project: string, buildId: string) => Output,
+  publish: (event: object) => void,
+  onError: (error: unknown) => void,
+): Promise<BuildRecord> {
+  busy.add(project.name);
+  try {
+    const record = await store.create(project);
+    logs.set(project.name, []);
+    publish({ type: 'build', project: project.name, record });
+    publish({ type: 'busy', project: project.name, busy: true });
+    void runBuild(project, record, store, outputFor(project.name, record.id), () => publish({ type: 'build', project: project.name, record }))
+      .catch(onError)
+      .finally(() => {
+        busy.delete(project.name);
+        publish({ type: 'busy', project: project.name, busy: false });
+      });
+    return record;
+  } catch (error) {
+    busy.delete(project.name);
+    throw error;
+  }
+}

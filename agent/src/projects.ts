@@ -23,3 +23,9 @@ export async function loadProjects(file = process.env.PROJECTS_FILE || path.reso
     return { name: item.name, path: item.path, buildCommand: item.buildCommand };
   });
 }
+
+export function projectByName(projects: Project[], name: string): Project {
+  const project = projects.find((item) => item.name === name);
+  if (!project) throw Object.assign(new Error('项目不存在'), { statusCode: 404 });
+  return project;
+}
