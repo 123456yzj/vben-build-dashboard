@@ -1,0 +1,9 @@
+{
+  "projects": [
+    {
+      "name": "vben",
+      "path": "/data/projects/vben",
+      "buildCommand": "pnpm build"
+    }
+  ]
+}
