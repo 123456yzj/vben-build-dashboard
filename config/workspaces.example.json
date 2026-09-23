@@ -4,11 +4,7 @@
       "name": "vben",
       "path": "/data/projects/vben",
       "repositoryDir": "app",
-      "depth": 1,
-      "build": {
-        "all": { "command": "pnpm", "args": ["build:dev"] },
-        "repositories": {}
-      }
+      "depth": 1
     }
   ]
 }

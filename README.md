@@ -12,18 +12,12 @@
     "name": "vben",
     "path": "/data/projects/vben",
     "repositoryDir": "app",
-    "depth": 1,
-    "build": {
-      "all": { "command": "pnpm", "args": ["build:dev"] },
-      "repositories": {
-        "tms": { "command": "pnpm", "args": ["build:dev:tms"] }
-      }
-    }
+    "depth": 1
   }]
 }
 ```
 
-`repositoryDir` 默认为 `app`，`depth` 默认为 1（仅直接子目录），可设为 1 至 5。扫描到含 `.git` 目录或文件的子目录即加入仓库列表；深层仓库名使用相对于扫描目录的路径，例如 `group/tms`。`build.repositories` 可按该名称覆盖仓库构建命令；未配置时执行 `pnpm build:dev:<仓库目录名>`。全量构建在 Workspace 根目录执行 `build.all`，示例为 `pnpm build:dev`；单业务构建在业务仓库目录执行。构建命令只从服务端配置读取，客户端仅提交目标。构建前检查所有目标仓库 clean，dirty 仓库禁止构建；多业务构建按所选顺序依次执行，失败立即停止。
+`repositoryDir` 默认为 `app`，`depth` 默认为 1（仅直接子目录），可设为 1 至 5。扫描到含 `.git` 目录或文件的子目录即加入仓库列表；深层仓库名使用相对于扫描目录的路径，例如 `group/tms`。构建只调用主工程 `package.json` 中实际存在的 `build:dev` 系列脚本，均在主工程目录执行：全量使用 `pnpm run build:dev`；单业务先尝试 `build:dev:<目录名>`，再用仓库 `package.json.name` 的末段匹配，例如 `@repo/admin` 对应 `build:dev:admin`。不执行仓库自己的构建脚本，也不接受客户端提供命令。没有匹配脚本的仓库仍会被扫描，但不可选中构建。构建前检查所有目标仓库 clean，dirty 仓库禁止构建；多业务构建按所选顺序依次执行，失败立即停止。
 
 Git 操作以仓库为目标：支持分支状态、fetch、切分支及 `pull --ff-only`。dirty 仓库禁止切分支和 pull。进行中的冲突操作直接拒绝，不排队或重试。最近 100 条构建任务保存在 `data/build-tasks.json`；日志只在 Agent 进程内暂存，重启后清空，未完成的任务标记为失败但不恢复执行。
 

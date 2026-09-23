@@ -15,11 +15,12 @@ export interface Repository {
   git: GitInfo | null;
   busy: boolean;
   buildable: boolean;
+  buildScript: string | null;
   error?: string;
 }
 
 export interface WorkspaceDetail extends Workspace {
-  build: { all: { command: string; args: string[] } };
+  build: { all: string | null };
   busy: boolean;
 }
 

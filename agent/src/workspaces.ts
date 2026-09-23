@@ -2,24 +2,13 @@ import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export interface CommandSpec { command: string; args: string[] }
 export interface Workspace {
   name: string;
   path: string;
   repositoryDir: string;
   depth: number;
-  build: { all: CommandSpec; repositories: Record<string, CommandSpec> };
 }
 export interface Repository { workspace: string; name: string; path: string }
-
-function commandSpec(value: unknown): CommandSpec {
-  if (!value || typeof value !== 'object' || !('command' in value) || !('args' in value) ||
-    typeof value.command !== 'string' || !value.command.trim() ||
-    !Array.isArray(value.args) || !value.args.every((arg) => typeof arg === 'string')) {
-    throw new Error('Build commands require a program name and string args array');
-  }
-  return { command: value.command, args: value.args as string[] };
-}
 
 export async function loadWorkspaces(file = process.env.WORKSPACES_FILE || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../config/workspaces.json')): Promise<Workspace[]> {
   const parsed: unknown = JSON.parse(await readFile(file, 'utf8'));
@@ -39,18 +28,9 @@ export async function loadWorkspaces(file = process.env.WORKSPACES_FILE || path.
       !Number.isInteger(depth) || (depth as number) < 1 || (depth as number) > 5) {
       throw new Error('repositoryDir must stay inside the Workspace and depth must be 1..5');
     }
-    const build = item.build;
-    if (!build || typeof build !== 'object' || !('all' in build)) throw new Error('Workspace build.all is required');
-    const overrides = 'repositories' in build ? build.repositories : {};
-    if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) throw new Error('build.repositories must be an object');
-    const repositories: Record<string, CommandSpec> = Object.create(null);
-    for (const [name, command] of Object.entries(overrides)) {
-      if (!name || name.split('/').some((part) => !part || part === '.' || part === '..')) throw new Error('Invalid repository override name');
-      repositories[name] = commandSpec(command);
-    }
+    if (item.build !== undefined) throw new Error('Build scripts are read from the Workspace package.json, not workspaces.json');
     names.add(value.name);
-    return { name: value.name, path: value.path, repositoryDir, depth: depth as number,
-      build: { all: commandSpec(build.all), repositories } };
+    return { name: value.name, path: value.path, repositoryDir, depth: depth as number };
   });
 }
 

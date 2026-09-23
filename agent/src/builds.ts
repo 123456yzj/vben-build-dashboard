@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { CommandSpec, Repository, Workspace } from './workspaces.js';
+import type { Repository, Workspace } from './workspaces.js';
 import { execute, type Output } from './process.js';
 import { getGitStatus } from './git.js';
 
@@ -70,12 +70,33 @@ export class BuildStore {
   }
 }
 
-export function repositoryCommand(workspace: Workspace, repository: Repository): CommandSpec {
-  const override = workspace.build.repositories[repository.name];
-  if (override) return override;
-  const name = path.basename(repository.path);
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(name)) throw Object.assign(new Error(`仓库 ${repository.name} 需要独立配置构建命令`), { statusCode: 400 });
-  return { command: 'pnpm', args: [`build:dev:${name}`] };
+export async function workspaceBuildScripts(workspace: Workspace): Promise<Set<string>> {
+  const parsed: unknown = JSON.parse(await readFile(path.join(workspace.path, 'package.json'), 'utf8'));
+  if (!parsed || typeof parsed !== 'object' || !('scripts' in parsed) || !parsed.scripts ||
+    typeof parsed.scripts !== 'object' || Array.isArray(parsed.scripts)) throw new Error('主工程 package.json 缺少 scripts');
+  return new Set(Object.entries(parsed.scripts).filter(([name, value]) =>
+    /^build:dev(?::[a-zA-Z0-9_-]+)?$/.test(name) && typeof value === 'string' && value.trim()).map(([name]) => name));
+}
+
+export function allBuildScript(scripts: Set<string>): string {
+  if (!scripts.has('build:dev')) throw Object.assign(new Error('主工程未配置 build:dev 脚本'), { statusCode: 400 });
+  return 'build:dev';
+}
+
+export async function repositoryBuildScript(repository: Repository, scripts: Set<string>): Promise<string> {
+  const candidates = [path.basename(repository.path)];
+  try {
+    const parsed: unknown = JSON.parse(await readFile(path.join(repository.path, 'package.json'), 'utf8'));
+    if (parsed && typeof parsed === 'object' && 'name' in parsed && typeof parsed.name === 'string') {
+      candidates.push(parsed.name.split('/').at(-1)!);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  for (const name of candidates) {
+    if (/^[a-zA-Z0-9_-]+$/.test(name) && scripts.has(`build:dev:${name}`)) return `build:dev:${name}`;
+  }
+  throw Object.assign(new Error(`主工程没有匹配 ${repository.name} 的 dev 构建脚本`), { statusCode: 400 });
 }
 
 export async function checkClean(repositories: Repository[]): Promise<string[]> {
@@ -88,7 +109,7 @@ export async function checkClean(repositories: Repository[]): Promise<string[]> 
   return branches;
 }
 
-export async function runBuild(workspace: Workspace, repositories: Repository[], task: BuildTask, store: BuildStore,
+export async function runBuild(workspace: Workspace, scripts: string[], task: BuildTask, store: BuildStore,
   output: Output, publish: (event: object) => void): Promise<void> {
   const notify = () => publish({ type: 'build', workspace: workspace.name, task: { ...task, steps: task.steps.map((step) => ({ ...step })) } });
   try {
@@ -97,16 +118,14 @@ export async function runBuild(workspace: Workspace, repositories: Repository[],
     notify();
     for (let i = 0; i < task.steps.length; i++) {
       const step = task.steps[i]!;
-      const repository = repositories[i];
-      const spec = task.scope === 'all' ? workspace.build.all : repositoryCommand(workspace, repository!);
-      const cwd = task.scope === 'all' ? workspace.path : repository!.path;
+      const script = scripts[i]!;
       step.status = 'running';
       await store.save();
       notify();
       const started = Date.now();
-      output('stdout', `\n$ ${spec.command} ${spec.args.join(' ')} (${step.repository || workspace.name})\n`);
+      output('stdout', `\n$ pnpm run ${script} (${step.repository || workspace.name})\n`);
       try {
-        await execute(spec.command, spec.args, cwd, output);
+        await execute('pnpm', ['run', script], workspace.path, output);
         step.status = 'success';
       } catch (error) {
         step.status = 'failed';

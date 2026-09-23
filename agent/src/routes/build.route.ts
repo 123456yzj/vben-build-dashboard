@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { checkClean, repositoryCommand, runBuild, type BuildStore } from '../builds.js';
+import { allBuildScript, checkClean, repositoryBuildScript, runBuild, workspaceBuildScripts, type BuildStore } from '../builds.js';
 import type { OperationLocks } from '../locks.js';
 import { RepositoryScanner, workspaceByName, type Workspace } from '../workspaces.js';
 import type { registerSocket } from '../websocket/socket.js';
@@ -9,6 +9,7 @@ export function registerBuildRoute(app: FastifyInstance, workspaces: Workspace[]
   app.post<{ Params: { workspace: string }; Body: { scope?: string; repositories?: unknown } }>('/api/workspaces/:workspace/builds', async (request, reply) => {
     const workspace = workspaceByName(workspaces, request.params.workspace);
     const { scope, repositories: names } = request.body || {};
+    if (Object.keys(request.body || {}).some((key) => key !== 'scope' && key !== 'repositories')) return reply.code(400).send({ error: '不支持提交构建命令' });
     if (scope !== 'all' && scope !== 'repositories') return reply.code(400).send({ error: '无效的构建范围' });
     if (scope === 'all' && names !== undefined) return reply.code(400).send({ error: '全量构建不能指定仓库' });
     if (scope === 'repositories' && (!Array.isArray(names) || !names.length ||
@@ -20,14 +21,15 @@ export function registerBuildRoute(app: FastifyInstance, workspaces: Workspace[]
     if (!repositories.length || repositories.some((repo) => !repo)) return reply.code(400).send({ error: '构建目标不存在或为空' });
     const targets = repositories.filter((repo) => repo !== undefined);
     for (const repository of targets) await scanner.find(workspace, repository.name);
-    if (scope === 'repositories') targets.forEach((repository) => repositoryCommand(workspace, repository));
+    const available = await workspaceBuildScripts(workspace);
+    const scripts = scope === 'all' ? [allBuildScript(available)] : await Promise.all(targets.map((repo) => repositoryBuildScript(repo, available)));
     const release = locks.acquire(workspace.name, targets.map((repo) => repo.name), scope === 'all');
     try {
       const branches = await checkClean(targets);
       const task = await store.create(workspace, scope, targets, branches);
       logs.set(task.id, []);
       publish({ type: 'build', workspace: workspace.name, task });
-      void runBuild(workspace, targets, task, store, outputFor(workspace.name, task.id), publish)
+      void runBuild(workspace, scripts, task, store, outputFor(workspace.name, task.id), publish)
         .catch((error) => app.log.error(error))
         .finally(() => { release(); publish({ type: 'busy', workspace: workspace.name, busy: false }); });
       return reply.code(202).send(task);

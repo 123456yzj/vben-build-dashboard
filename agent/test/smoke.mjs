@@ -5,7 +5,7 @@ import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { repositoryCommand } from '../dist/builds.js';
+import { repositoryBuildScript, workspaceBuildScripts } from '../dist/builds.js';
 
 const agentRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const root = await mkdtemp(path.join(os.tmpdir(), 'vben-workspace-smoke-'));
@@ -24,6 +24,7 @@ async function addRepo(name) {
   git(repo, 'config', 'user.name', 'Smoke Test');
   git(repo, 'config', 'user.email', 'smoke@example.invalid');
   await writeFile(path.join(repo, 'README.md'), 'test\n');
+  await writeFile(path.join(repo, 'package.json'), JSON.stringify({ name: `@repo/${path.basename(name)}`, scripts: { 'build:dev': 'node -e "process.exit(4)"' } }));
   git(repo, 'add', '.');
   git(repo, 'commit', '-m', 'Initial commit');
   git(repo, 'branch', 'feature');
@@ -54,17 +55,14 @@ try {
   await addRepo(path.join('group', 'nested'));
   const workspace = {
     name: 'vben', path: root, repositoryDir: 'app', depth: 1,
-    build: {
-      all: { command: process.execPath, args: ['-e', "console.log('ALL_SMOKE')"] },
-      repositories: {
-        tms: { command: process.execPath, args: ['-e', "console.log('TMS_SMOKE')"] },
-        oms: { command: process.execPath, args: ['-e', 'process.exit(3)'] },
-        crm: { command: process.execPath, args: ['-e', "console.log('CRM_SMOKE')"] },
-      },
-    },
   };
-  assert.deepEqual(repositoryCommand({ ...workspace, build: { ...workspace.build, repositories: {} } },
-    { workspace: 'vben', name: 'tms', path: tms }), { command: 'pnpm', args: ['build:dev:tms'] });
+  await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'main-workspace', scripts: {
+    'build:dev': "node -e \"console.log('ALL_SMOKE')\"",
+    'build:dev:tms': "node -e \"console.log('TMS_SMOKE')\"",
+    'build:dev:oms': 'node -e "process.exit(3)"',
+    'build:dev:crm': "node -e \"console.log('CRM_SMOKE')\"",
+  } }));
+  assert.equal(await repositoryBuildScript({ workspace: 'vben', name: 'tms', path: tms }, await workspaceBuildScripts(workspace)), 'build:dev:tms');
   const config = path.join(root, 'workspaces.json');
   await writeFile(config, JSON.stringify({ workspaces: [workspace] }));
   const port = await freePort();
@@ -93,6 +91,7 @@ try {
   const list = (await api('/api/workspaces/vben/repositories')).body;
   assert.deepEqual(list.map((item) => item.name), ['crm', 'oms', 'tms']);
   assert.equal(list[2].git.branch, 'main');
+  assert.equal(list[2].buildScript, 'build:dev:tms');
   assert.equal((await api('/api/workspaces/missing')).status, 404);
 
   const events = [];
@@ -117,6 +116,7 @@ try {
 
   assert.equal((await post(builds, { scope: 'repositories', repositories: ['missing'] })).status, 400);
   assert.equal((await post(builds, { scope: 'repositories', repositories: ['tms', 'tms'] })).status, 400);
+  assert.equal((await post(builds, { scope: 'all', command: 'node -e "process.exit(0)"' })).status, 400);
   const started = await post(builds, { scope: 'repositories', repositories: ['tms', 'oms', 'crm'] });
   assert.equal(started.status, 202);
   const failed = await waitFor(async () => {
@@ -136,7 +136,9 @@ try {
   assert.equal((await api(builds)).body.length, 2);
   assert(events.some((event) => event.type === 'log' && event.buildId === all.body.id));
   await addRepo('new-business');
-  assert((await api('/api/workspaces/vben/repositories?refresh=true')).body.some((repo) => repo.name === 'new-business'));
+  const refreshed = (await api('/api/workspaces/vben/repositories?refresh=true')).body;
+  assert.equal(refreshed.find((repo) => repo.name === 'new-business').buildable, false);
+  assert.equal((await post(builds, { scope: 'repositories', repositories: ['new-business'] })).status, 400);
   assert((await fetch(`${base}/workspaces/vben`)).headers.get('content-type')?.includes('text/html'));
   console.log('Smoke test passed: scan, Git safety, dirty build, multi-stop, all build, logs, refresh');
 } finally {
