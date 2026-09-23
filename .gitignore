@@ -2,6 +2,10 @@ node_modules/
 **/node_modules/
 # Build output for both workspaces and TypeScript incremental builds
 dist/
+**/dist/
+*.js.map
+*.d.ts
+!frontend/env.d.ts
 *.tsbuildinfo
 *.log
 .DS_Store

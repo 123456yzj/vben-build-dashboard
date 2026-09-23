@@ -1,0 +1,35 @@
+name: Docker image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          IMAGE=$(printf '%s' "$IMAGE" | tr '[:upper:]' '[:lower:]')
+          if [ "$REF_TYPE" = tag ]; then
+            TAG="$REF_NAME"
+          else
+            TAG=latest
+          fi
+          docker build -t "$IMAGE:$TAG" .
+          docker push "$IMAGE:$TAG"
