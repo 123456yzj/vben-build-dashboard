@@ -27,6 +27,8 @@ Git 操作以仓库为目标：支持分支状态、fetch、切分支及 `pull -
 
 ## Docker 部署
 
+面板顶部可检测并安装已发布的更新。镜像推送到 `main` 后会同步发布运行文件包；更新按钮替换当前容器内的构建产物并重启服务。若依赖锁文件发生变化，需使用 `docker compose pull && docker compose up -d` 更新镜像。
+
 服务器需要 Docker、Docker Compose v2 和 curl：
 
 ```bash

@@ -10,6 +10,7 @@ import { OperationLocks } from './locks.js';
 import { registerWorkspaceRoutes } from './routes/workspace.route.js';
 import { registerGitRoute } from './routes/git.route.js';
 import { registerBuildRoute } from './routes/build.route.js';
+import { registerUpdateRoutes } from './updates.js';
 import { registerSocket } from './websocket/socket.js';
 
 const app = Fastify({ logger: true });
@@ -25,6 +26,7 @@ const socket = registerSocket(app);
 registerWorkspaceRoutes(app, workspaces, scanner, store, locks);
 registerGitRoute(app, workspaces, scanner, locks, socket);
 registerBuildRoute(app, workspaces, scanner, store, locks, socket);
+registerUpdateRoutes(app);
 
 app.setErrorHandler((error, _request, reply) => {
   app.log.error(error);
