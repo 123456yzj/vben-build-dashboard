@@ -1,0 +1,16 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  --font-ui: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'DM Mono', monospace;
+  --color-text: #202a30;
+  --color-background: #f5f7f7;
+  --color-surface: #fff;
+  --color-primary: #157864;
+  --color-border: #dce5e5;
+  --color-success: #168c6d;
+  --color-error: #d35858;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+}

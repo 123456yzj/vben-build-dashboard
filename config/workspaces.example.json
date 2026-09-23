@@ -1,0 +1,10 @@
+{
+  "workspaces": [
+    {
+      "name": "vben",
+      "path": "/data/projects/vben",
+      "repositoryDir": "app",
+      "depth": 1
+    }
+  ]
+}

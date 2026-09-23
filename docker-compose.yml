@@ -1,22 +1,16 @@
 services:
-  vben-build-dashboard:
-    build: .
-    container_name: vben-build-dashboard
+  agent:
+    image: ghcr.io/123456yzj/vben-build-dashboard:${VERSION:-latest}
     restart: unless-stopped
     ports:
-      - "9527:9527"
-      - "8081:9527"
+      - "${PORT:-9527}:9527"
     environment:
-      - HOST=0.0.0.0
-      - PORT=9527
-      - TARGET_REPO_PATH=${HOST_REPO_PATH:-/mnt/d/project/impact/app-v1/web-framework-2}
+      HOST: 0.0.0.0
+      PORT: 9527
+      WORKSPACES_FILE: /app/config/workspaces.json
+      HISTORY_FILE: /app/data/build-tasks.json
     volumes:
-      # 1. 保持 WSL 宿主机与容器路径一致，使 pnpm 的绝对依赖链接可用
-      - ${HOST_REPO_PATH:-/mnt/d/project/impact/app-v1/web-framework-2}:${HOST_REPO_PATH:-/mnt/d/project/impact/app-v1/web-framework-2}
-      # 2. 持久化工具配置
-      - ./config.json:/app/config.json
-      # 3. SQLite 需要 Linux 文件系统提供可靠的文件锁和 WAL 支持
-      - dashboard-data:/app/data
-
-volumes:
-  dashboard-data:
+      - ./config/workspaces.json:/app/config/workspaces.json:ro
+      - ./data:/app/data
+      # Workspace paths must exist inside the container at the same absolute path.
+      - ${PROJECTS_ROOT:-/data/projects}:${PROJECTS_ROOT:-/data/projects}

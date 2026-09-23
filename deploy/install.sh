@@ -1,112 +1,86 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-set -Eeuo pipefail
-IFS=$'\n\t'
+install_dir=/opt/vben-control-dashboard
+project_root=/data/projects
+port=9527
+version=latest
+force=false
+parameter_mode=false
+compose_url=https://raw.githubusercontent.com/123456yzj/vben-build-dashboard/main/docker-compose.yml
 
-readonly DEFAULT_IMAGE='ghcr.io/123456yzj/vben-build-dashboard'
-readonly DEFAULT_VERSION='latest'
-readonly DEFAULT_PORT='9527'
-readonly DEFAULT_INSTALL_DIR='/opt/vben-build-dashboard'
-readonly CALLING_DIR="$(pwd -P)"
+usage() {
+  cat <<'EOF'
+Usage: install.sh [--install-dir PATH] [--project-root PATH] [--port PORT] [--version TAG] [--force]
 
-log() {
-  printf '[vben-build-dashboard] %s\n' "$*"
+With no arguments, prompts for paths and port. With arguments, runs without prompts.
+--force overwrites the managed compose file, .env and config/workspaces.json; data/ is preserved.
+EOF
 }
 
-fail() {
-  printf '[vben-build-dashboard] ERROR: %s\n' "$*" >&2
-  exit 1
-}
+die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 
-yaml_quote() {
-  local value=${1//\'/\'\'}
-  printf "'%s'" "$value"
-}
+while (($#)); do
+  parameter_mode=true
+  case "$1" in
+    --install-dir|--project-root|--port|--version)
+      (($# >= 2)) || die "Missing value for $1"
+      case "$1" in
+        --install-dir) install_dir=$2 ;;
+        --project-root) project_root=$2 ;;
+        --port) port=$2 ;;
+        --version) version=$2 ;;
+      esac
+      shift 2 ;;
+    --force) force=true; shift ;;
+    --help|-h) usage; exit 0 ;;
+    *) die "Unknown argument: $1" ;;
+  esac
+done
 
-json_quote() {
-  local value=${1//\\/\\\\}
-  value=${value//\"/\\\"}
-  printf '"%s"' "$value"
-}
-
-[[ $(uname -s) == 'Linux' ]] || fail '此安装脚本仅支持 Linux。'
-(( EUID == 0 )) || fail '请以 root 运行，例如: curl -fsSL <安装脚本 URL> | sudo bash'
-
-command -v docker >/dev/null 2>&1 || fail '未检测到 Docker。请先通过发行版官方文档安装 Docker Engine；本脚本不会自动执行第三方安装脚本。'
-docker compose version >/dev/null 2>&1 || fail '未检测到 Docker Compose v2 插件，请先安装后重试。'
-docker info >/dev/null 2>&1 || fail '无法连接 Docker daemon，请确认 Docker 服务已启动且当前用户有访问权限。'
-
-IMAGE=${IMAGE:-$DEFAULT_IMAGE}
-VERSION=${VERSION:-$DEFAULT_VERSION}
-PORT=${PORT:-$DEFAULT_PORT}
-HOST_REPO_PATH=${HOST_REPO_PATH:-$CALLING_DIR}
-INSTALL_DIR=${INSTALL_DIR:-$DEFAULT_INSTALL_DIR}
-
-[[ -n $IMAGE ]] || fail 'IMAGE 不能为空。'
-[[ -n $VERSION ]] || fail 'VERSION 不能为空。'
-[[ $IMAGE =~ ^[a-zA-Z0-9._/-]+$ ]] || fail "IMAGE 格式无效: $IMAGE"
-[[ $VERSION =~ ^[a-zA-Z0-9._-]+$ ]] || fail "VERSION 格式无效: $VERSION"
-[[ $PORT =~ ^[0-9]+$ ]] || fail "PORT 必须是数字，当前值: $PORT"
-(( PORT >= 1 && PORT <= 65535 )) || fail "PORT 必须在 1 到 65535 之间，当前值: $PORT"
-[[ -d $HOST_REPO_PATH ]] || fail "HOST_REPO_PATH 不存在或不是目录: $HOST_REPO_PATH"
-[[ -e $HOST_REPO_PATH/package.json || -e $HOST_REPO_PATH/.git ]] || fail 'HOST_REPO_PATH 必须是包含 package.json 或 .git 的项目目录。'
-[[ $HOST_REPO_PATH != *$'\n'* && $HOST_REPO_PATH != *$'\r'* && $HOST_REPO_PATH != *$'\t'* ]] || fail 'HOST_REPO_PATH 不能包含控制字符。'
-[[ $INSTALL_DIR = /* ]] || fail "INSTALL_DIR 必须是绝对路径: $INSTALL_DIR"
-[[ $INSTALL_DIR != *$'\n'* && $INSTALL_DIR != *$'\r'* && $INSTALL_DIR != *$'\t'* ]] || fail 'INSTALL_DIR 不能包含控制字符。'
-
-HOST_REPO_PATH="$(cd "$HOST_REPO_PATH" && pwd -P)"
-mkdir -p "$INSTALL_DIR"
-
-CONFIG_PATH="$INSTALL_DIR/config.json"
-COMPOSE_PATH="$INSTALL_DIR/compose.yaml"
-IMAGE_REF="$IMAGE:$VERSION"
-
-if [[ ! -e $CONFIG_PATH ]]; then
-  {
-    printf '{\n'
-    printf '  "port": 9527,\n'
-    printf '  "host": "0.0.0.0",\n'
-    printf '  "targetRepoPath": %s,\n' "$(json_quote "$HOST_REPO_PATH")"
-    printf '  "protectedBranches": ["master", "main", "develop", "test"]\n'
-    printf '}\n'
-  } >"$CONFIG_PATH"
-  chmod 600 "$CONFIG_PATH"
-  log "已创建持久配置: $CONFIG_PATH"
-else
-  log "保留现有配置: $CONFIG_PATH"
+if ! $parameter_mode; then
+  [[ -r /dev/tty ]] || die 'Interactive installation requires a terminal; pass arguments for unattended installation'
+  read -r -p "Install directory [$install_dir]: " input </dev/tty
+  install_dir=${input:-$install_dir}
+  read -r -p "Project root [$project_root]: " input </dev/tty
+  project_root=${input:-$project_root}
+  read -r -p "Port [$port]: " input </dev/tty
+  port=${input:-$port}
 fi
 
-{
-  printf 'services:\n'
-  printf '  dashboard:\n'
-  printf '    image: %s\n' "$(yaml_quote "$IMAGE_REF")"
-  printf '    restart: unless-stopped\n'
-  printf '    ports:\n'
-  printf '      - %s\n' "$(yaml_quote "$PORT:9527")"
-  printf '    environment:\n'
-  printf '      HOST: %s\n' "$(yaml_quote '0.0.0.0')"
-  printf '      PORT: %s\n' "$(yaml_quote '9527')"
-  printf '      TARGET_REPO_PATH: %s\n' "$(yaml_quote "$HOST_REPO_PATH")"
-  printf '      CONFIG_PATH: %s\n' "$(yaml_quote '/app/config.json')"
-  printf '      DATA_DIR: %s\n' "$(yaml_quote '/app/data')"
-  printf '      STATIC_DIR: %s\n' "$(yaml_quote '/app/frontend/dist')"
-  printf '    volumes:\n'
-  printf '      - type: bind\n'
-  printf '        source: %s\n' "$(yaml_quote "$HOST_REPO_PATH")"
-  printf '        target: %s\n' "$(yaml_quote "$HOST_REPO_PATH")"
-  printf '      - type: bind\n'
-  printf '        source: %s\n' "$(yaml_quote "$CONFIG_PATH")"
-  printf '        target: %s\n' "$(yaml_quote '/app/config.json')"
-  printf '      - type: volume\n'
-  printf '        source: dashboard-data\n'
-  printf '        target: %s\n' "$(yaml_quote '/app/data')"
-  printf 'volumes:\n'
-  printf '  dashboard-data:\n'
-} >"$COMPOSE_PATH"
+[[ "$install_dir" = /* && "$install_dir" != *$'\n'* ]] || die 'Install directory must be an absolute path without newlines'
+[[ "$project_root" = /* && "$project_root" != *[[:space:]:\#\$]* ]] || die 'Project root must be an absolute path without spaces, colon, # or $'
+[[ "$port" =~ ^[0-9]+$ ]] || die 'Port must be a number between 1 and 65535'
+((10#$port >= 1 && 10#$port <= 65535)) || die 'Port must be between 1 and 65535'
+[[ "$version" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$ ]] || die 'Invalid Docker image tag'
 
-log "拉取镜像: $IMAGE_REF"
-docker compose --project-directory "$INSTALL_DIR" -f "$COMPOSE_PATH" pull
-docker compose --project-directory "$INSTALL_DIR" -f "$COMPOSE_PATH" up -d --remove-orphans
+command -v docker >/dev/null 2>&1 || die 'Docker is required'
+docker compose version >/dev/null 2>&1 || die 'Docker Compose v2 is required'
+docker info >/dev/null 2>&1 || die 'Docker daemon is unavailable'
+command -v curl >/dev/null 2>&1 || die 'curl is required to download docker-compose.yml'
 
-log "部署完成: http://localhost:$PORT"
-log "部署目录: $INSTALL_DIR"
+if [[ -e "$install_dir" && "$force" != true ]]; then
+  if $parameter_mode; then
+    die "Install directory already exists: $install_dir (use --force to overwrite managed configuration)"
+  fi
+  read -r -p "Directory $install_dir exists. Continue and keep existing project configuration? [y/N] " answer </dev/tty
+  [[ "$answer" =~ ^[yY]([eE][sS])?$ ]] || die 'Installation cancelled'
+elif ! $parameter_mode; then
+  read -r -p "Install into $install_dir with projects at $project_root on port $port? [y/N] " answer </dev/tty
+  [[ "$answer" =~ ^[yY]([eE][sS])?$ ]] || die 'Installation cancelled'
+fi
+
+mkdir -p "$install_dir/config" "$install_dir/data" "$project_root"
+temp_file=$(mktemp "$install_dir/.docker-compose.yml.XXXXXX")
+trap 'rm -f "$temp_file"' EXIT
+curl --fail --location --silent --show-error --output "$temp_file" "$compose_url"
+if [[ "$force" == true || ! -f "$install_dir/config/workspaces.json" ]]; then
+  printf '{\n  "workspaces": []\n}\n' > "$install_dir/config/workspaces.json"
+fi
+printf 'PORT=%s\nPROJECTS_ROOT=%s\nVERSION=%s\n' "$port" "$project_root" "$version" > "$install_dir/.env"
+mv -f "$temp_file" "$install_dir/docker-compose.yml"
+docker compose --project-directory "$install_dir" -f "$install_dir/docker-compose.yml" config --quiet
+docker compose --project-directory "$install_dir" -f "$install_dir/docker-compose.yml" pull
+docker compose --project-directory "$install_dir" -f "$install_dir/docker-compose.yml" up -d
+
+printf 'Installed in %s\nEdit %s/config/workspaces.json to add Workspaces, then restart the service.\nOpen http://localhost:%s/ (or use the server IP).\n' "$install_dir" "$install_dir" "$port"

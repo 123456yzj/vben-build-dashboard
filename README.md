@@ -1,122 +1,50 @@
-# vben-build-dashboard
+# Vben Workspace 管理器
 
-面向 Monorepo / 多仓前端项目的轻量分支管理与开发环境打包控制台。
+管理一个或多个 vben 主工程，以及每个主工程 `app` 目录下独立的业务 Git 仓库。Agent 提供 HTTP API 与 WebSocket 日志，前端用于查看仓库分支、切分支、拉取更新及运行固定 dev 构建。无需数据库或登录服务。
 
-项目采用前后端分离工程架构（参考 `sub2api` 目录规范）：
-- **`frontend/`**：TypeScript + Vue 3 + Vite 7 单页面前端应用。
-- **`backend/`**：TypeScript + Node.js + Koa 2 + WebSocket + SQLite 后端服务。
-- **`deploy/`**：容器化与生产部署脚本及配置（Dockerfile、Docker Compose 等）。
+## 配置
 
-## 目录结构
+将 `config/workspaces.example.json` 复制为 `config/workspaces.json`，按 Agent 能访问的绝对路径填写主工程：
 
-```
-vben-build-dashboard/
-├── backend/                  # 后端独立工程
-│   ├── src/                  # 后端 TypeScript 源码
-│   │   ├── lib/              # 构建、配置、数据库与 Git 模块
-│   │   ├── bridge.ts         # Windows 与 WSL 端口转发桥接脚本
-│   │   └── server.ts         # Koa 服务入口 (REST API + WebSocket + 静态托管)
-│   ├── config.example.json   # 默认配置示例
-│   ├── package.json          # 后端依赖配置
-│   └── tsconfig.json         # 后端 TypeScript 编译配置
-├── frontend/                 # 前端独立工程
-│   ├── public/               # 前端静态资源
-│   ├── src/                  # Vue 3 前端源码
-│   │   ├── components/       # UI 组件库 (控制台、大盘面板、弹窗等)
-│   │   ├── App.vue           # 根组件
-│   │   ├── main.ts           # 前端入口
-│   │   ├── style.css         # 全局样式
-│   │   └── useDashboard.ts   # 组合式状态管理与通信
-│   ├── index.html            # HTML 模板入口
-│   ├── package.json          # 前端依赖配置
-│   ├── tsconfig.json         # 前端 TypeScript 检查配置
-│   └── vite.config.ts        # Vite 配置 (代理 /api 与 /ws 到后端)
-├── deploy/                   # 部署与运维配置
-│   ├── docker-compose.yml    # Docker Compose 服务编排
-│   ├── Dockerfile            # 多阶段构建 Dockerfile
-│   ├── rebuild-docker.sh     # 容器重新构建与热替换脚本
-│   ├── setup-portproxy-9527.bat # Windows WSL 端口转发脚本
-│   └── start.sh              # 宿主机一键启动脚本
-├── docs/                     # 项目设计文档
-├── Dockerfile                # 根目录 Dockerfile（方便直接根目录构建）
-├── docker-compose.yml        # 根目录 compose 文件
-├── package.json              # 根工作区 (npm workspaces 聚合前后端调度)
-└── README.md
+```json
+{
+  "workspaces": [{
+    "name": "vben",
+    "path": "/data/projects/vben",
+    "repositoryDir": "app",
+    "depth": 1
+  }]
+}
 ```
 
-## 核心功能
+`repositoryDir` 默认为 `app`，`depth` 默认为 1（仅直接子目录），可设为 1 至 5。扫描到含 `.git` 目录或文件的子目录即加入仓库列表；深层仓库名使用相对于扫描目录的路径，例如 `group/tms`。构建只调用主工程 `package.json` 中实际存在的 `build:dev` 系列脚本，均在主工程目录执行：全量使用 `pnpm run build:dev`；单业务先尝试 `build:dev:<目录名>`，再用仓库 `package.json.name` 的末段匹配，例如 `@repo/admin` 对应 `build:dev:admin`。不执行仓库自己的构建脚本，也不接受客户端提供命令。没有匹配脚本的仓库仍会被扫描，但不可选中构建。构建前检查所有目标仓库 clean，dirty 仓库禁止构建；多业务构建按所选顺序依次执行，失败立即停止。每个业务构建前根据根目录 `.turbo/cache` 的 manifest 清理该业务对应的缓存，全量构建前清理整个缓存目录；构建进程设置 `TURBO_FORCE=true`，跳过本地及远程 Turbo 缓存。
 
-- **多仓分支大盘**：自动识别 Monorepo 根目录与 `apps/*` 子仓，展示分支、最新提交和工作区状态。
-- **Git 自动化**：支持 fetch、单仓/多仓批量切分支、stash 暂存、reset 重置及失效/已合并本地分支清理。
-- **打包调度**：支持单应用、多应用及全量开发环境打包，通过 WebSocket 实时输出终端彩色彩字日志。
-- **极速响应**：使用 SQLite 缓存仓库状态，避免高耗时的重复物理扫描（毫秒级开屏）。
+Git 操作以仓库为目标：支持分支状态、fetch、切分支及 `pull --ff-only`。dirty 仓库禁止切分支和 pull。进行中的冲突操作直接拒绝，不排队或重试。最近 100 条构建任务保存在 `data/build-tasks.json`；日志只在 Agent 进程内暂存，重启后清空，未完成的任务标记为失败但不恢复执行。
 
-## 快速开始 (本地开发)
+## 从旧版本迁移
 
-在项目根目录下通过 npm workspaces 一键启动：
+旧的 `config/projects.json` **不会自动读取或转换**。升级前备份该文件及 `data/build-history.json`；核对每个旧项目是否是 vben 主工程，在新的 `config/workspaces.json` 中填写其根目录与扫描目录，并确认项目内存在对应的 dev 构建脚本。旧的任意 `buildCommand` 不会迁移；新历史保存在 `data/build-tasks.json`，旧历史保留为归档。更新 Compose 的配置挂载与 `WORKSPACES_FILE` 后重建服务。安装脚本不会删除旧的 `projects.json`。
 
-需要 Node.js 22.12 或更高版本。
+## Docker 部署
 
-```bash
-# 1. 安装根目录及前后端依赖
-npm install
-
-# 2. 同时启动后端 (9527) 与前端 Vite 开发服务器 (5173)
-npm run dev
-
-# 严格检查前后端 TypeScript
-npm run typecheck
-```
-
-浏览器访问 `http://localhost:5173`。Vite 会自动将 `/api` 与 `/ws` 请求反向代理至后端 `9527` 端口。
-
-亦可进入各自目录独立启动：
-- 前端独立开发：`cd frontend && npm run dev`
-- 后端独立开发：`cd backend && npm run dev`
-
-## 生产运行 (宿主机)
-
-```bash
-# 编译前后端并启动 Koa 单服务
-npm start
-```
-
-生产服务监听 `http://0.0.0.0:9527`，本机访问 `http://localhost:9527`。
-
-## Docker 容器化运行
-
-### 使用 GHCR 预构建镜像
-
-项目通过 GitHub Actions 将 `main` 和 `v*` 版本标签构建为 amd64/arm64 镜像并发布到
-`ghcr.io/123456yzj/vben-build-dashboard`。首次发布后，需要在 GitHub Packages 设置中将该容器包的
-可见性改为 Public，服务器才能匿名拉取。
-
-服务器需要预先安装 Docker Engine 和 Docker Compose v2。进入需要管理的目标 Monorepo 根目录后执行：
+服务器需要 Docker、Docker Compose v2 和 curl：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/123456yzj/vben-build-dashboard/main/deploy/install.sh | sudo bash
 ```
 
-也可以明确指定目标仓库、端口和镜像版本：
+安装目录默认为 `/opt/vben-control-dashboard`，挂载的工程父目录默认为 `/data/projects`，端口默认为 `9527`。安装时生成空的 `config/workspaces.json`；填写后重建服务。`--force` 会覆盖受管理的 Workspace 配置、`.env` 和 Compose 文件，保留 `data/`，操作前应备份配置。手动部署可参照根目录 `docker-compose.yml`：准备 `.env`（`PORT`、`PROJECTS_ROOT`、`VERSION`）及 `config/workspaces.json`，然后运行 `docker compose up -d`。
+
+配置中的绝对路径须在容器内保持一致，项目目录需有写权限；容器内已安装 Git、Node.js 22 和 pnpm 9，目标主工程的依赖及 Git 凭据仍需可用。面板不提供鉴权，只应暴露于可信内网或 VPN。
+
+## 本地开发
+
+Node.js 22.12+：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/123456yzj/vben-build-dashboard/main/deploy/install.sh \
-  | sudo env HOST_REPO_PATH=/srv/web-framework PORT=9527 VERSION=1.0.0 bash
+cp config/workspaces.example.json config/workspaces.json
+npm ci
+npm run dev
 ```
 
-安装文件保存在 `/opt/vben-build-dashboard`。重复执行命令会拉取指定镜像并更新容器，不会覆盖已有
-`config.json`。可用变量包括 `IMAGE`、`VERSION`、`PORT`、`HOST_REPO_PATH` 和 `INSTALL_DIR`。
-
-### 从源码构建
-
-在项目根目录执行：
-
-```bash
-# 使用缓存一键重新编译并替换运行中的容器
-bash rebuild-docker.sh
-
-# 忽略缓存，全量重建镜像
-bash rebuild-docker.sh --no-cache
-```
-
-`deploy/rebuild-docker.sh` 用于拉取 GHCR 镜像并升级已有的镜像部署，不执行本地源码构建。
+浏览器访问 `http://localhost:5173`，Vite 将 `/api` 和 `/ws` 代理至本地 Agent 的 9527 端口。运行 `npm run typecheck` 检查类型，`npm run build` 构建面板；Agent smoke test 位于 `agent/test/smoke.mjs`。

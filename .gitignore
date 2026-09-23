@@ -1,7 +1,12 @@
 node_modules/
 **/node_modules/
+# Build output for both workspaces and TypeScript incremental builds
 dist/
-frontend/dist/
+**/dist/
+*.js.map
+*.d.ts
+!frontend/env.d.ts
+*.tsbuildinfo
 *.log
 .DS_Store
 config.json
@@ -10,3 +15,5 @@ config.json
 data/
 backend/data/
 .env
+config/projects.json
+config/workspaces.json
