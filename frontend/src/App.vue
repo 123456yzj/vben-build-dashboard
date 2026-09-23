@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { ArrowLeftRight, Check, ChevronDown, ChevronUp, CircleAlert, Clock3, Copy, GitBranch, Play, RefreshCw, Search, Settings2, Square, Terminal, X } from 'lucide-vue-next';
+import { ArrowLeftRight, Check, ChevronDown, ChevronUp, CircleAlert, Clock3, Copy, Download, GitBranch, Play, RefreshCw, Search, Settings2, Square, Terminal, X } from 'lucide-vue-next';
 import { cancelBuild, getBuild, getBuilds, getRepositories, getWorkspace, getWorkspaces, gitAction, startBuild } from './api/workspace';
+import { checkUpdate, performUpdate, type UpdateInfo } from './api/update';
 import { useWebSocket, type SocketMessage } from './composables/useWebSocket';
 import type { BuildTask } from './types/build';
 import type { BuildLog, Repository, TaskDetail, Workspace, WorkspaceDetail } from './types/workspace';
+import { version as appVersion } from '../../package.json';
 
 const workspaces = ref<Workspace[]>([]);
 const selected = ref<string | null>(null);
@@ -17,6 +19,9 @@ const loading = ref(false);
 const working = ref(false);
 const cancelling = ref<string | null>(null);
 const error = ref('');
+const updateInfo = ref<UpdateInfo | null>(null);
+const updateBusy = ref(false);
+const updateError = ref('');
 const dialog = ref<'settings' | 'branch' | null>(null);
 const branchRepo = ref<Repository | null>(null);
 const branchTarget = ref('');
@@ -43,6 +48,27 @@ const selectedStep = computed(() => active.value?.steps.find((step) => step.repo
 const branchOptions = computed(() => [...new Set([...(branchRepo.value?.git?.localBranches || []), ...(branchRepo.value?.git?.remoteBranches || [])])].filter((name) => name.toLowerCase().includes(branchQuery.value.toLowerCase())));
 
 function statusLabel(status: string) { return ({ pending: '等待中', running: '构建中', success: '成功', failed: '失败', cancelled: '已终止' } as Record<string, string>)[status] || status; }
+async function refreshUpdate(showError = false) {
+  try { updateInfo.value = await checkUpdate(); updateError.value = updateInfo.value.error || ''; if (showError && updateError.value) error.value = updateError.value; }
+  catch (cause) { updateError.value = (cause as Error).message; if (showError) error.value = updateError.value; }
+}
+async function updateDashboard() {
+  if (updateBusy.value || !updateInfo.value?.available) return;
+  updateBusy.value = true;
+  try {
+    const result = await performUpdate();
+    if (!result.updated) { await refreshUpdate(); return; }
+    for (let attempt = 0; attempt < 30; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      try {
+        const info = await checkUpdate();
+        if (info.current === updateInfo.value?.latest) { location.reload(); return; }
+      } catch { /* Service is restarting. */ }
+    }
+    error.value = '更新已安装，但服务尚未恢复，请稍后刷新页面';
+  } catch (cause) { error.value = (cause as Error).message; }
+  finally { updateBusy.value = false; }
+}
 function taskLabel(task: BuildTask) { return task.scope === 'all' ? '全量 Dev 构建' : task.repositories.join('、'); }
 function duration(ms: number | null) { return ms === null ? '—' : `${(ms / 1000).toFixed(1)} 秒`; }
 function labelFor(repo: Repository) {
@@ -215,13 +241,13 @@ watch(drawerOpen, (opened) => {
   }
 });
 function onKeydown(event: KeyboardEvent) { if (event.key === 'Escape') { if (dialog.value) dialog.value = null; else drawerOpen.value = false; } }
-onMounted(() => { void loadList(); connect(); window.addEventListener('keydown', onKeydown); });
+onMounted(() => { void loadList(); void refreshUpdate(); connect(); window.addEventListener('keydown', onKeydown); });
 onUnmounted(() => { disconnect(); window.removeEventListener('keydown', onKeydown); });
 </script>
 
 <template>
   <div class="app-shell">
-    <header class="topbar"><div class="brand"><span class="brand-mark"><Terminal :size="17" /></span><span>VBEN <strong>DEV BUILD CONSOLE</strong></span></div><span class="connection" :class="{ online: connected }"><span class="dot" />{{ connected ? 'AGENT ONLINE' : 'AGENT OFFLINE · 正在重连' }}</span></header>
+    <header class="topbar"><div class="brand"><span class="brand-mark"><Terminal :size="17" /></span><span>VBEN <strong>DEV BUILD CONSOLE</strong></span></div><div class="topbar-actions"><button v-if="updateInfo?.available" class="button secondary" :disabled="updateBusy" :title="`更新到 ${updateInfo.latest}`" @click="updateDashboard"><Download :size="15" />{{ updateBusy ? '更新中…' : '更新面板' }}</button><button class="icon-button" :disabled="updateBusy || updateInfo?.supported === false" :title="updateError || (updateInfo?.supported === false ? '本地开发不支持在线更新' : '检测面板更新')" aria-label="检测面板更新" @click="refreshUpdate(true)"><RefreshCw :size="15" :class="{ spin: updateBusy }" /></button><span class="connection" :class="{ online: connected }"><span class="dot" />{{ connected ? 'AGENT ONLINE' : 'AGENT OFFLINE · 正在重连' }}</span><span class="app-version" :title="updateInfo?.current || ''">v{{ updateInfo?.version || appVersion }}<template v-if="updateInfo?.current"> · {{ updateInfo.current.slice(0, 7) }}</template></span></div></header>
     <main class="workspace">
       <div v-if="error" class="alert" role="alert"><CircleAlert :size="17" />{{ error }}<button aria-label="关闭错误" @click="error = ''"><X :size="16" /></button></div>
       <div v-if="!selected" class="empty-state"><Terminal :size="26" /><h1>尚未配置 Vben 主工程</h1><p>请在 config/workspaces.json 中配置工程根目录。</p><button class="button secondary" @click="loadList"><RefreshCw :size="15" />重新加载</button></div>
