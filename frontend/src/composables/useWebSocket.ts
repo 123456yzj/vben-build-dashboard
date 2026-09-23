@@ -12,6 +12,8 @@ export interface SocketMessage {
   stream?: string;
   text?: string;
   buildId?: string;
+  time?: string;
+  sequence?: number;
 }
 
 export function useWebSocket(onMessage: (message: SocketMessage) => void, onConnected: () => void) {

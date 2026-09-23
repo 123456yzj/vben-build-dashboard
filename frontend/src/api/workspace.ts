@@ -19,3 +19,7 @@ export const startBuild = (workspace: string, body: { scope: 'all' } | { scope: 
   request<BuildTask>(`${base(workspace)}/builds`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
+export const cancelBuild = (workspace: string, id: string) =>
+  request<BuildTask>(`${base(workspace)}/builds/${encodeURIComponent(id)}/cancel`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+  });

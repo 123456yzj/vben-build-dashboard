@@ -4,8 +4,9 @@ import { randomUUID } from 'node:crypto';
 import type { Repository, Workspace } from './workspaces.js';
 import { execute, type Output } from './process.js';
 import { getGitStatus } from './git.js';
+import { clearTurboCache } from './turbo-cache.js';
 
-export type BuildState = 'pending' | 'running' | 'success' | 'failed';
+export type BuildState = 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
 export interface BuildStep { repository: string | null; branch: string; status: BuildState; duration: number | null }
 export interface BuildTask {
   id: string;
@@ -110,37 +111,42 @@ export async function checkClean(repositories: Repository[]): Promise<string[]> 
 }
 
 export async function runBuild(workspace: Workspace, scripts: string[], task: BuildTask, store: BuildStore,
-  output: Output, publish: (event: object) => void): Promise<void> {
+  outputFor: (repository: string | null) => Output, publish: (event: object) => void, signal: AbortSignal,
+  repositories: Repository[]): Promise<void> {
   const notify = () => publish({ type: 'build', workspace: workspace.name, task: { ...task, steps: task.steps.map((step) => ({ ...step })) } });
   try {
     task.status = 'running';
     await store.save();
     notify();
     for (let i = 0; i < task.steps.length; i++) {
+      if (signal.aborted) { task.status = 'cancelled'; break; }
       const step = task.steps[i]!;
       const script = scripts[i]!;
+      const output = outputFor(step.repository);
       step.status = 'running';
       await store.save();
       notify();
       const started = Date.now();
-      output('stdout', `\n$ pnpm run ${script} (${step.repository || workspace.name})\n`);
       try {
-        await execute('pnpm', ['run', script], workspace.path, output);
-        step.status = 'success';
+        const cleared = await clearTurboCache(workspace, step.repository ? repositories[i]! : null, signal);
+        output('stdout', `\n[cache] ${step.repository || '全量'}: 清理 ${cleared} 项 Turbo 缓存，强制执行构建\n$ pnpm run ${script} (${step.repository || workspace.name})\n`);
+        await execute('pnpm', ['run', script], workspace.path, output, false, signal, { TURBO_FORCE: 'true' });
+        step.status = signal.aborted ? 'cancelled' : 'success';
       } catch (error) {
-        step.status = 'failed';
-        task.status = 'failed';
-        output('stderr', `\nBuild failed: ${(error as Error).message.slice(-300)}\n`);
+        step.status = signal.aborted ? 'cancelled' : 'failed';
+        task.status = signal.aborted ? 'cancelled' : 'failed';
+        output('stderr', signal.aborted ? '\nBuild cancelled\n' : `\nBuild failed: ${(error as Error).message.slice(-300)}\n`);
       }
       step.duration = Date.now() - started;
       await store.save();
       notify();
-      if (task.status === 'failed') break;
+      if (task.status === 'failed' || task.status === 'cancelled') break;
     }
-    if (task.status !== 'failed') task.status = 'success';
+    if (signal.aborted) task.status = 'cancelled';
+    else if (task.status !== 'failed') task.status = 'success';
   } catch (error) {
-    task.status = 'failed';
-    output('stderr', `\nBuild failed: ${(error as Error).message.slice(-300)}\n`);
+    task.status = signal.aborted ? 'cancelled' : 'failed';
+    outputFor(null)('stderr', signal.aborted ? '\nBuild cancelled\n' : `\nBuild failed: ${(error as Error).message.slice(-300)}\n`);
   } finally {
     task.duration = Date.now() - Date.parse(task.time);
     await store.save();

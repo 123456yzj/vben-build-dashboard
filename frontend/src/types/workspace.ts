@@ -25,5 +25,14 @@ export interface WorkspaceDetail extends Workspace {
 }
 
 export interface TaskDetail extends BuildTask {
-  logs: { stream: string; text: string; buildId: string }[];
+  logs: BuildLog[];
+}
+
+export interface BuildLog {
+  stream: string;
+  text: string;
+  buildId: string;
+  repository: string | null;
+  time: string;
+  sequence: number;
 }

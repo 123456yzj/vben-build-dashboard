@@ -6,6 +6,7 @@ import type { registerSocket } from '../websocket/socket.js';
 
 export function registerBuildRoute(app: FastifyInstance, workspaces: Workspace[], scanner: RepositoryScanner, store: BuildStore,
   locks: OperationLocks, { logs, publish, outputFor }: ReturnType<typeof registerSocket>): void {
+  const running = new Map<string, { controller: AbortController; done: Promise<void> }>();
   app.post<{ Params: { workspace: string }; Body: { scope?: string; repositories?: unknown } }>('/api/workspaces/:workspace/builds', async (request, reply) => {
     const workspace = workspaceByName(workspaces, request.params.workspace);
     const { scope, repositories: names } = request.body || {};
@@ -29,14 +30,27 @@ export function registerBuildRoute(app: FastifyInstance, workspaces: Workspace[]
       const task = await store.create(workspace, scope, targets, branches);
       logs.set(task.id, []);
       publish({ type: 'build', workspace: workspace.name, task });
-      void runBuild(workspace, scripts, task, store, outputFor(workspace.name, task.id), publish)
+      const controller = new AbortController();
+      const done = runBuild(workspace, scripts, task, store, (repository) => outputFor(workspace.name, task.id, repository), publish, controller.signal, targets)
         .catch((error) => app.log.error(error))
-        .finally(() => { release(); publish({ type: 'busy', workspace: workspace.name, busy: false }); });
+        .finally(() => { running.delete(task.id); release(); publish({ type: 'busy', workspace: workspace.name, busy: false }); });
+      running.set(task.id, { controller, done });
       return reply.code(202).send(task);
     } catch (error) { release(); throw error; }
   });
   app.get<{ Params: { workspace: string; id: string } }>('/api/workspaces/:workspace/builds/:id', async (request) => {
     const workspace = workspaceByName(workspaces, request.params.workspace);
     return { ...store.get(workspace.name, request.params.id), logs: logs.get(request.params.id) || [] };
+  });
+  app.post<{ Params: { workspace: string; id: string } }>('/api/workspaces/:workspace/builds/:id/cancel', async (request, reply) => {
+    const workspace = workspaceByName(workspaces, request.params.workspace);
+    const task = store.get(workspace.name, request.params.id);
+    const job = running.get(task.id);
+    if (!job || (task.status !== 'pending' && task.status !== 'running') || job.controller.signal.aborted) {
+      return reply.code(409).send({ error: '该构建已结束或正在终止' });
+    }
+    job.controller.abort();
+    await job.done;
+    return task;
   });
 }

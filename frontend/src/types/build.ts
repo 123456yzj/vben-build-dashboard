@@ -1,4 +1,4 @@
-export type BuildState = 'pending' | 'running' | 'success' | 'failed';
+export type BuildState = 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
 export interface BuildStep {
   repository: string | null;
   branch: string;

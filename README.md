@@ -17,7 +17,7 @@
 }
 ```
 
-`repositoryDir` 默认为 `app`，`depth` 默认为 1（仅直接子目录），可设为 1 至 5。扫描到含 `.git` 目录或文件的子目录即加入仓库列表；深层仓库名使用相对于扫描目录的路径，例如 `group/tms`。构建只调用主工程 `package.json` 中实际存在的 `build:dev` 系列脚本，均在主工程目录执行：全量使用 `pnpm run build:dev`；单业务先尝试 `build:dev:<目录名>`，再用仓库 `package.json.name` 的末段匹配，例如 `@repo/admin` 对应 `build:dev:admin`。不执行仓库自己的构建脚本，也不接受客户端提供命令。没有匹配脚本的仓库仍会被扫描，但不可选中构建。构建前检查所有目标仓库 clean，dirty 仓库禁止构建；多业务构建按所选顺序依次执行，失败立即停止。
+`repositoryDir` 默认为 `app`，`depth` 默认为 1（仅直接子目录），可设为 1 至 5。扫描到含 `.git` 目录或文件的子目录即加入仓库列表；深层仓库名使用相对于扫描目录的路径，例如 `group/tms`。构建只调用主工程 `package.json` 中实际存在的 `build:dev` 系列脚本，均在主工程目录执行：全量使用 `pnpm run build:dev`；单业务先尝试 `build:dev:<目录名>`，再用仓库 `package.json.name` 的末段匹配，例如 `@repo/admin` 对应 `build:dev:admin`。不执行仓库自己的构建脚本，也不接受客户端提供命令。没有匹配脚本的仓库仍会被扫描，但不可选中构建。构建前检查所有目标仓库 clean，dirty 仓库禁止构建；多业务构建按所选顺序依次执行，失败立即停止。每个业务构建前根据根目录 `.turbo/cache` 的 manifest 清理该业务对应的缓存，全量构建前清理整个缓存目录；构建进程设置 `TURBO_FORCE=true`，跳过本地及远程 Turbo 缓存。
 
 Git 操作以仓库为目标：支持分支状态、fetch、切分支及 `pull --ff-only`。dirty 仓库禁止切分支和 pull。进行中的冲突操作直接拒绝，不排队或重试。最近 100 条构建任务保存在 `data/build-tasks.json`；日志只在 Agent 进程内暂存，重启后清空，未完成的任务标记为失败但不恢复执行。
 
