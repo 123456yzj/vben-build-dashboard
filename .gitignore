@@ -16,3 +16,4 @@ data/
 backend/data/
 .env
 config/projects.json
+config/workspaces.json

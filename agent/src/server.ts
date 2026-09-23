@@ -5,23 +5,26 @@ import websocket from '@fastify/websocket';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BuildStore } from './builds.js';
-import { loadProjects } from './projects.js';
-import { registerProjectRoutes } from './routes/project.route.js';
+import { loadWorkspaces, RepositoryScanner } from './workspaces.js';
+import { OperationLocks } from './locks.js';
+import { registerWorkspaceRoutes } from './routes/workspace.route.js';
 import { registerGitRoute } from './routes/git.route.js';
 import { registerBuildRoute } from './routes/build.route.js';
 import { registerSocket } from './websocket/socket.js';
 
 const app = Fastify({ logger: true });
-const projects = await loadProjects();
-const store = new BuildStore(process.env.HISTORY_FILE || path.resolve('data/build-history.json'));
+const workspaces = await loadWorkspaces();
+const scanner = new RepositoryScanner();
+for (const workspace of workspaces) await scanner.list(workspace, true);
+const store = new BuildStore(process.env.HISTORY_FILE || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../data/build-tasks.json'));
 await store.init();
-const busy = new Set<string>();
+const locks = new OperationLocks();
 
 await app.register(websocket);
 const socket = registerSocket(app);
-registerProjectRoutes(app, projects, store, busy, socket);
-registerGitRoute(app, projects, busy, socket);
-registerBuildRoute(app, projects, store, busy, socket);
+registerWorkspaceRoutes(app, workspaces, scanner, store, locks);
+registerGitRoute(app, workspaces, scanner, locks, socket);
+registerBuildRoute(app, workspaces, scanner, store, locks, socket);
 
 app.setErrorHandler((error, _request, reply) => {
   app.log.error(error);

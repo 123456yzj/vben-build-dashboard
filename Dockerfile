@@ -17,6 +17,6 @@ COPY frontend/package.json frontend/package.json
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/agent/dist agent/dist
 COPY --from=build /app/frontend/dist frontend/dist
-ENV HOST=0.0.0.0 PORT=9527 PROJECTS_FILE=/app/config/projects.json HISTORY_FILE=/app/data/build-history.json STATIC_DIR=/app/frontend/dist
+ENV HOST=0.0.0.0 PORT=9527 WORKSPACES_FILE=/app/config/workspaces.json HISTORY_FILE=/app/data/build-tasks.json STATIC_DIR=/app/frontend/dist
 EXPOSE 9527
 CMD ["node", "agent/dist/server.js"]

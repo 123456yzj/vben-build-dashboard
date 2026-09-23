@@ -14,7 +14,7 @@ usage() {
 Usage: install.sh [--install-dir PATH] [--project-root PATH] [--port PORT] [--version TAG] [--force]
 
 With no arguments, prompts for paths and port. With arguments, runs without prompts.
---force overwrites the managed compose file, .env and config/projects.json; data/ is preserved.
+--force overwrites the managed compose file, .env and config/workspaces.json; data/ is preserved.
 EOF
 }
 
@@ -74,8 +74,8 @@ mkdir -p "$install_dir/config" "$install_dir/data" "$project_root"
 temp_file=$(mktemp "$install_dir/.docker-compose.yml.XXXXXX")
 trap 'rm -f "$temp_file"' EXIT
 curl --fail --location --silent --show-error --output "$temp_file" "$compose_url"
-if [[ "$force" == true || ! -f "$install_dir/config/projects.json" ]]; then
-  printf '{\n  "projects": []\n}\n' > "$install_dir/config/projects.json"
+if [[ "$force" == true || ! -f "$install_dir/config/workspaces.json" ]]; then
+  printf '{\n  "workspaces": []\n}\n' > "$install_dir/config/workspaces.json"
 fi
 printf 'PORT=%s\nPROJECTS_ROOT=%s\nVERSION=%s\n' "$port" "$project_root" "$version" > "$install_dir/.env"
 mv -f "$temp_file" "$install_dir/docker-compose.yml"
@@ -83,4 +83,4 @@ docker compose --project-directory "$install_dir" -f "$install_dir/docker-compos
 docker compose --project-directory "$install_dir" -f "$install_dir/docker-compose.yml" pull
 docker compose --project-directory "$install_dir" -f "$install_dir/docker-compose.yml" up -d
 
-printf 'Installed in %s\nEdit %s/config/projects.json to add projects, then restart the service.\nOpen http://localhost:%s/ (or use the server IP).\n' "$install_dir" "$install_dir" "$port"
+printf 'Installed in %s\nEdit %s/config/workspaces.json to add Workspaces, then restart the service.\nOpen http://localhost:%s/ (or use the server IP).\n' "$install_dir" "$install_dir" "$port"

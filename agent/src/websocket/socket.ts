@@ -9,13 +9,13 @@ export function registerSocket(app: FastifyInstance) {
     for (const socket of sockets) if (socket.readyState === 1) socket.send(data);
   }
 
-  function outputFor(project: string, buildId: string) {
+  function outputFor(workspace: string, buildId: string, repository?: string) {
     return (stream: 'stdout' | 'stderr', text: string) => {
-      const list = logs.get(project) || [];
+      const list = logs.get(buildId) || [];
       list.push({ stream, text: text.slice(-65536), buildId });
       if (list.length > 2000) list.splice(0, list.length - 2000);
-      logs.set(project, list);
-      publish({ type: 'log', project, buildId, stream, text });
+      logs.set(buildId, list);
+      publish({ type: 'log', workspace, repository, buildId, stream, text });
     };
   }
 

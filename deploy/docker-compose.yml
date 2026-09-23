@@ -7,9 +7,9 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 9527
-      PROJECTS_FILE: /app/config/projects.json
-      HISTORY_FILE: /app/data/build-history.json
+      WORKSPACES_FILE: /app/config/workspaces.json
+      HISTORY_FILE: /app/data/build-tasks.json
     volumes:
-      - ../config/projects.json:/app/config/projects.json:ro
+      - ../config/workspaces.json:/app/config/workspaces.json:ro
       - ../data:/app/data
       - ${PROJECTS_ROOT:-/data/projects}:${PROJECTS_ROOT:-/data/projects}

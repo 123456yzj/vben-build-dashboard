@@ -1,72 +1,56 @@
-# vben-control-dashboard
+# Vben Workspace 管理器
 
-单人使用的 vben 项目远程控制面板。服务器运行 Node.js Agent，浏览器通过 HTTP 触发 Git 和构建操作，通过 WebSocket 接收实时日志。不需要数据库或登录服务。
-
-## 目录
-
-- `frontend/`：Vue 3 + TypeScript + Vite 界面
-- `agent/`：Fastify + WebSocket 服务，执行 Git 与构建命令
-- `config/projects.json`：本机项目清单（安装时创建空清单，或从 `config/projects.example.json` 复制）
-- `data/build-history.json`：自动创建的最近 100 条构建记录
-- `deploy/`：一键安装脚本与部署说明
+管理一个或多个 vben 主工程，以及每个主工程 `app` 目录下独立的业务 Git 仓库。Agent 提供 HTTP API 与 WebSocket 日志，前端用于查看仓库分支、切分支、拉取更新及运行固定 dev 构建。无需数据库或登录服务。
 
 ## 配置
 
-在 `config/projects.json` 中按服务器上的实际绝对路径填写项目（安装脚本会先创建 `{ "projects": [] }`）：
+将 `config/workspaces.example.json` 复制为 `config/workspaces.json`，按 Agent 能访问的绝对路径填写主工程：
 
 ```json
 {
-  "projects": [
-    { "name": "vben", "path": "/data/projects/vben", "buildCommand": "pnpm build" },
-    { "name": "vben-admin", "path": "/data/projects/vben-admin", "buildCommand": "pnpm build" }
-  ]
+  "workspaces": [{
+    "name": "vben",
+    "path": "/data/projects/vben",
+    "repositoryDir": "app",
+    "depth": 1,
+    "build": {
+      "all": { "command": "pnpm", "args": ["build:dev"] },
+      "repositories": {
+        "tms": { "command": "pnpm", "args": ["build:dev:tms"] }
+      }
+    }
+  }]
 }
 ```
 
-项目名必须唯一。构建命令仅从服务器配置读取，浏览器不能提交任意 shell 命令。Agent 进程必须有项目目录、Git 凭据与目标项目依赖的访问权限；目标项目自身的依赖仍需能在容器内使用。远程 Git 凭据请提前配置到容器可访问的位置，非交互式操作不会弹出密码提示。
+`repositoryDir` 默认为 `app`，`depth` 默认为 1（仅直接子目录），可设为 1 至 5。扫描到含 `.git` 目录或文件的子目录即加入仓库列表；深层仓库名使用相对于扫描目录的路径，例如 `group/tms`。`build.repositories` 可按该名称覆盖仓库构建命令；未配置时执行 `pnpm build:dev:<仓库目录名>`。全量构建在 Workspace 根目录执行 `build.all`，示例为 `pnpm build:dev`；单业务构建在业务仓库目录执行。构建命令只从服务端配置读取，客户端仅提交目标。构建前检查所有目标仓库 clean，dirty 仓库禁止构建；多业务构建按所选顺序依次执行，失败立即停止。
 
-## Docker 部署（推荐）
+Git 操作以仓库为目标：支持分支状态、fetch、切分支及 `pull --ff-only`。dirty 仓库禁止切分支和 pull。进行中的冲突操作直接拒绝，不排队或重试。最近 100 条构建任务保存在 `data/build-tasks.json`；日志只在 Agent 进程内暂存，重启后清空，未完成的任务标记为失败但不恢复执行。
 
-服务器只需要 Docker、Docker Compose v2 和下载脚本所用的 curl，无需克隆源码或在宿主机安装 Node.js、pnpm、面板依赖。镜像 `ghcr.io/123456yzj/vben-build-dashboard` 在 `main` 推送后发布 `latest`，推送 `v*` tag 后发布同名版本；首次安装前需确保相应镜像已发布且可以拉取（私有包需先 `docker login ghcr.io`）。
+## 从旧版本迁移
+
+旧的 `config/projects.json` **不会自动读取或转换**。升级前备份该文件及 `data/build-history.json`；核对每个旧项目是否是 vben 主工程，在新的 `config/workspaces.json` 中填写其根目录与扫描目录，并确认项目内存在对应的 dev 构建脚本。旧的任意 `buildCommand` 不会迁移；新历史保存在 `data/build-tasks.json`，旧历史保留为归档。更新 Compose 的配置挂载与 `WORKSPACES_FILE` 后重建服务。安装脚本不会删除旧的 `projects.json`。
+
+## Docker 部署
+
+服务器需要 Docker、Docker Compose v2 和 curl：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/123456yzj/vben-build-dashboard/main/deploy/install.sh | sudo bash
 ```
 
-无参数时交互选择安装目录、项目根目录和端口；管道执行时从终端读取回答。传入任意参数即无交互运行：
+安装目录默认为 `/opt/vben-control-dashboard`，挂载的工程父目录默认为 `/data/projects`，端口默认为 `9527`。安装时生成空的 `config/workspaces.json`；填写后重建服务。`--force` 会覆盖受管理的 Workspace 配置、`.env` 和 Compose 文件，保留 `data/`，操作前应备份配置。手动部署可参照根目录 `docker-compose.yml`：准备 `.env`（`PORT`、`PROJECTS_ROOT`、`VERSION`）及 `config/workspaces.json`，然后运行 `docker compose up -d`。
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/123456yzj/vben-build-dashboard/main/deploy/install.sh | sudo bash -s -- --install-dir /opt/vben --project-root /srv/projects --port 8080 --version v1.0.0
-```
-
-默认安装到 `/opt/vben-control-dashboard`，挂载 `/data/projects`，端口 `9527`，镜像标签为 `latest`。已有安装目录时交互安装会请求确认；参数模式需要添加 `--force` 才能覆盖。`--force` 会重置 `config/projects.json` 并覆盖 `.env`、Compose 文件，保留 `data/`。编辑安装目录下的 `config/projects.json` 后运行 `docker compose --project-directory /opt/vben-control-dashboard -f /opt/vben-control-dashboard/docker-compose.yml up -d --force-recreate` 使新项目清单生效。
-
-手动安装也不需要源码。以 root 身份在服务器执行（所需目录及目标项目目录需要可写）：
-
-```bash
-mkdir -p /opt/vben-control-dashboard/config /opt/vben-control-dashboard/data /data/projects
-cd /opt/vben-control-dashboard
-curl -fsSL https://raw.githubusercontent.com/123456yzj/vben-build-dashboard/main/docker-compose.yml -o docker-compose.yml
-printf '{"projects":[]}\n' > config/projects.json
-printf 'PORT=9527\nPROJECTS_ROOT=/data/projects\nVERSION=latest\n' > .env
-docker compose pull
-docker compose up -d
-```
-
-项目目录在容器内保持**相同的绝对路径**；若设为 `/srv/projects`，`.env` 中的 `PROJECTS_ROOT` 与项目清单中的路径也应使用 `/srv/projects`。构建历史保存在 `data/`，挂载的项目目录可写以支持 Git 与构建。镜像内含 Git、pnpm 9、Node.js 22；目标项目如需额外系统工具或平台相关依赖，须在容器环境提供。
-
-**网络边界：** 面板无登录鉴权，能访问端口的用户可以执行配置中的 Git/构建操作。仅在可信内网或 VPN 暴露端口，不要直接对公网开放。
+配置中的绝对路径须在容器内保持一致，项目目录需有写权限；容器内已安装 Git、Node.js 22 和 pnpm 9，目标主工程的依赖及 Git 凭据仍需可用。面板不提供鉴权，只应暴露于可信内网或 VPN。
 
 ## 本地开发
 
-Node.js 22.12+，项目路径必须是运行 Agent 的机器可访问的绝对路径。
+Node.js 22.12+：
 
 ```bash
-cp config/projects.example.json config/projects.json
+cp config/workspaces.example.json config/workspaces.json
 npm ci
 npm run dev
 ```
 
-浏览器访问 `http://localhost:5173`；Vite 代理 `/api` 和 `/ws` 到本地 Agent `9527`。`npm run typecheck` 检查前后端严格 TypeScript，`npm run build` 生成生产资源，`npm run start:agent` 启动已编译的服务。Agent 默认只监听 `127.0.0.1`，生产 Docker 显式监听 `0.0.0.0`。
-
-Git 支持状态、分支列表、fetch、切分支与 `pull --ff-only`。工作区有改动时拒绝切分支和 pull；不执行 reset、clean、分支删除或自动冲突处理。同一项目同时只执行一个 Git/构建操作；其他项目可并行。构建日志在服务进程内保留最近 2000 个片段用于刷新后恢复，构建历史写入 JSON；服务重启后日志清空，未完成记录标记为失败。
+浏览器访问 `http://localhost:5173`，Vite 将 `/api` 和 `/ws` 代理至本地 Agent 的 9527 端口。运行 `npm run typecheck` 检查类型，`npm run build` 构建面板；Agent smoke test 位于 `agent/test/smoke.mjs`。

@@ -5,18 +5,30 @@ import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { repositoryCommand } from '../dist/builds.js';
 
 const agentRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const root = await mkdtemp(path.join(os.tmpdir(), 'vben-control-smoke-'));
-const repo = path.join(root, 'repo');
+const root = await mkdtemp(path.join(os.tmpdir(), 'vben-workspace-smoke-'));
+const app = path.join(root, 'app');
 let child;
 let socket;
 
-function git(...args) {
+function git(repo, ...args) {
   const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
 }
-
+async function addRepo(name) {
+  const repo = path.join(app, name);
+  await mkdir(repo, { recursive: true });
+  git(repo, 'init', '-b', 'main');
+  git(repo, 'config', 'user.name', 'Smoke Test');
+  git(repo, 'config', 'user.email', 'smoke@example.invalid');
+  await writeFile(path.join(repo, 'README.md'), 'test\n');
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-m', 'Initial commit');
+  git(repo, 'branch', 'feature');
+  return repo;
+}
 async function waitFor(check, timeout = 10000) {
   const until = Date.now() + timeout;
   while (Date.now() < until) {
@@ -26,7 +38,6 @@ async function waitFor(check, timeout = 10000) {
   }
   throw new Error('Timed out waiting for agent state');
 }
-
 async function freePort() {
   const server = createServer();
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -36,46 +47,53 @@ async function freePort() {
 }
 
 try {
-  await mkdir(repo);
-  git('init', '-b', 'main');
-  git('config', 'user.name', 'Smoke Test');
-  git('config', 'user.email', 'smoke@example.invalid');
-  await writeFile(path.join(repo, 'README.md'), 'test\n');
-  git('add', '.');
-  git('commit', '-m', 'Initial commit');
-  git('branch', 'feature');
-
-  const config = path.join(root, 'projects.json');
-  await writeFile(config, JSON.stringify({ projects: [{ name: 'demo', path: repo, buildCommand: 'node -e "console.log(\'BUILD_SMOKE\')"' }] }));
+  await mkdir(app);
+  const tms = await addRepo('tms');
+  await addRepo('oms');
+  await addRepo('crm');
+  await addRepo(path.join('group', 'nested'));
+  const workspace = {
+    name: 'vben', path: root, repositoryDir: 'app', depth: 1,
+    build: {
+      all: { command: process.execPath, args: ['-e', "console.log('ALL_SMOKE')"] },
+      repositories: {
+        tms: { command: process.execPath, args: ['-e', "console.log('TMS_SMOKE')"] },
+        oms: { command: process.execPath, args: ['-e', 'process.exit(3)'] },
+        crm: { command: process.execPath, args: ['-e', "console.log('CRM_SMOKE')"] },
+      },
+    },
+  };
+  assert.deepEqual(repositoryCommand({ ...workspace, build: { ...workspace.build, repositories: {} } },
+    { workspace: 'vben', name: 'tms', path: tms }), { command: 'pnpm', args: ['build:dev:tms'] });
+  const config = path.join(root, 'workspaces.json');
+  await writeFile(config, JSON.stringify({ workspaces: [workspace] }));
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
   child = spawn(process.execPath, ['dist/server.js'], {
     cwd: agentRoot,
-    env: { ...process.env, PORT: String(port), PROJECTS_FILE: config, HISTORY_FILE: path.join(root, 'history.json'), STATIC_DIR: path.resolve(agentRoot, '../frontend/dist') },
+    env: { ...process.env, PORT: String(port), WORKSPACES_FILE: config, HISTORY_FILE: path.join(root, 'tasks.json'), STATIC_DIR: path.resolve(agentRoot, '../frontend/dist') },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let serverOutput = '';
   child.stdout.on('data', (chunk) => { serverOutput += chunk; });
   child.stderr.on('data', (chunk) => { serverOutput += chunk; });
-
   await waitFor(async () => {
     if (child.exitCode !== null) throw new Error(serverOutput);
-    try { return (await fetch(`${base}/api/projects`)).ok; } catch { return false; }
+    try { return (await fetch(`${base}/api/workspaces`)).ok; } catch { return false; }
   });
-
   async function api(url, options) {
     const response = await fetch(`${base}${url}`, options);
     return { status: response.status, body: await response.json() };
   }
-
-  const list = await api('/api/projects');
-  assert.equal(list.body[0].name, 'demo');
-  assert.equal(list.body[0].git.branch, 'main');
-  const detail = await api('/api/projects/demo');
-  assert.deepEqual(detail.body.history, []);
-  assert.deepEqual(detail.body.logs, []);
-  assert.equal(detail.body.busy, false);
-  assert.equal((await api('/api/projects/missing')).status, 404);
+  const headers = { 'Content-Type': 'application/json' };
+  const post = (url, body) => api(url, { method: 'POST', headers, body: JSON.stringify(body) });
+  const builds = '/api/workspaces/vben/builds';
+  const gitUrl = '/api/workspaces/vben/repositories/tms/git';
+  assert.equal((await api('/api/workspaces')).body[0].name, 'vben');
+  const list = (await api('/api/workspaces/vben/repositories')).body;
+  assert.deepEqual(list.map((item) => item.name), ['crm', 'oms', 'tms']);
+  assert.equal(list[2].git.branch, 'main');
+  assert.equal((await api('/api/workspaces/missing')).status, 404);
 
   const events = [];
   socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
@@ -84,26 +102,43 @@ try {
     socket.addEventListener('open', resolve, { once: true });
     socket.addEventListener('error', reject, { once: true });
   });
-  const headers = { 'Content-Type': 'application/json' };
-  assert.equal((await api('/api/projects/demo/git', { method: 'POST', headers, body: JSON.stringify({ action: 'invalid' }) })).status, 400);
-  const switched = await api('/api/projects/demo/git', { method: 'POST', headers, body: JSON.stringify({ action: 'checkout', branch: 'feature' }) });
+  assert.equal((await post(gitUrl, { action: 'invalid' })).status, 400);
+  const switched = await post(gitUrl, { action: 'checkout', branch: 'feature' });
   assert.equal(switched.body.git.branch, 'feature');
-  assert.equal((await api('/api/projects/demo')).body.git.branch, 'feature');
-  await waitFor(() => events.some((event) => event.type === 'git' && event.git.branch === 'feature'));
+  await waitFor(() => events.some((event) => event.type === 'git' && event.repository === 'tms' && event.git.branch === 'feature'));
 
-  const started = await api('/api/projects/demo/build', { method: 'POST' });
+  await writeFile(path.join(tms, 'dirty.txt'), 'dirty');
+  assert.equal((await post(gitUrl, { action: 'checkout', branch: 'main' })).status, 409);
+  assert.equal((await post(gitUrl, { action: 'pull' })).status, 409);
+  assert.equal((await post(builds, { scope: 'repositories', repositories: ['tms'] })).status, 409);
+  assert.equal((await post(builds, { scope: 'all' })).status, 409);
+  git(tms, 'add', 'dirty.txt');
+  git(tms, 'commit', '-m', 'Clean');
+
+  assert.equal((await post(builds, { scope: 'repositories', repositories: ['missing'] })).status, 400);
+  assert.equal((await post(builds, { scope: 'repositories', repositories: ['tms', 'tms'] })).status, 400);
+  const started = await post(builds, { scope: 'repositories', repositories: ['tms', 'oms', 'crm'] });
   assert.equal(started.status, 202);
-  assert.equal(started.body.branch, 'feature');
-  const finished = await waitFor(async () => {
-    const response = await api('/api/projects/demo');
-    return response.body.history[0]?.status === 'success' && response.body.logs.some((log) => log.text.includes('BUILD_SMOKE')) && response.body;
+  const failed = await waitFor(async () => {
+    const result = (await api(`${builds}/${started.body.id}`)).body;
+    return result.status === 'failed' && result;
   });
-  assert.equal(finished.history[0].id, started.body.id);
-  assert.equal((await api('/api/projects')).body[0].latestBuild.status, 'success');
-  await waitFor(() => events.some((event) => event.type === 'log' && event.text.includes('BUILD_SMOKE')));
-  assert.equal(events.some((event) => event.type === 'busy' && event.busy === true), true);
-  assert.equal((await fetch(`${base}/projects/demo`)).headers.get('content-type')?.includes('text/html'), true);
-  console.log('Smoke test passed: list, detail, Git, WebSocket logs, Build, history, static route');
+  assert.deepEqual(failed.steps.map((step) => step.status), ['success', 'failed', 'pending']);
+  assert(failed.logs.some((log) => log.text.includes('TMS_SMOKE')));
+  assert(!failed.logs.some((log) => log.text.includes('CRM_SMOKE')));
+  const all = await post(builds, { scope: 'all' });
+  assert.equal(all.status, 202);
+  const finished = await waitFor(async () => {
+    const result = (await api(`${builds}/${all.body.id}`)).body;
+    return result.status === 'success' && result;
+  });
+  assert(finished.logs.some((log) => log.text.includes('ALL_SMOKE')));
+  assert.equal((await api(builds)).body.length, 2);
+  assert(events.some((event) => event.type === 'log' && event.buildId === all.body.id));
+  await addRepo('new-business');
+  assert((await api('/api/workspaces/vben/repositories?refresh=true')).body.some((repo) => repo.name === 'new-business'));
+  assert((await fetch(`${base}/workspaces/vben`)).headers.get('content-type')?.includes('text/html'));
+  console.log('Smoke test passed: scan, Git safety, dirty build, multi-stop, all build, logs, refresh');
 } finally {
   socket?.close();
   if (child && child.exitCode === null) {
